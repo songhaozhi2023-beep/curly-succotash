@@ -1,0 +1,18 @@
+# Keil 构建产物（可由 UV4 重建）与 uVision GUI 状态文件
+Objects/
+Listings/
+*.uvgui.*
+*.uvgui.*
+
+# 厂商工具与压缩包（非源码）
+*.rar
+*.zip
+stc-isp6.96z/
+
+# 日志与临时文件
+*.log
+.vscode/uv4.log.lock
+
+# 本地工具缓存
+.em_skill.json
+__pycache__/
