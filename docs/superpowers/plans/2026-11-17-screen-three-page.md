@@ -279,7 +279,7 @@ cd "D:/流量压力检测集成装置" && git add modbus6_rtos/sensors.c && git 
 - Modify: `modbus6_rtos/screen.c`
 - Modify: `modbus6_rtos/config_app.h`（Step 3.0 微补充）
 
-- [ ] **Step 3.0: config_app.h 微补充**（Task 1 质量审查第 2/3/4 条）
+- [x] **Step 3.0: config_app.h 微补充**（Task 1 质量审查第 2/3/4 条）
 
 在 `#define REG_TIME_BASE 0x0040` 行之后追加：
 ```c
@@ -292,7 +292,7 @@ cd "D:/流量压力检测集成装置" && git add modbus6_rtos/sensors.c && git 
  *  0x0040~46 屏RTC: 年(任意),月(1~12),日(1~31),时(0~23),分(0~59),秒(0~59),星期(1~7) 各U16 (main.lua 每分钟写)
 ```
 
-- [ ] **Step 3.1: Scr_GetReg 增加读侧寄存器**
+- [x] **Step 3.1: Scr_GetReg 增加读侧寄存器**
 
 将：
 ```c
@@ -319,7 +319,7 @@ cd "D:/流量压力检测集成装置" && git add modbus6_rtos/sensors.c && git 
     return 0;   /* 未映射地址返回 0 */
 ```
 
-- [ ] **Step 3.2: Scr_SetReg 整体替换**
+- [x] **Step 3.2: Scr_SetReg 整体替换**
 
 返回值约定改为 `1=成功 0=非法地址 2=非法数据值`。整体替换为：
 ```c
@@ -357,7 +357,7 @@ static u8 Scr_SetReg(u16 a, u16 v)
 }
 ```
 
-- [ ] **Step 3.3: Scr_Process 适配新返回值**
+- [x] **Step 3.3: Scr_Process 适配新返回值**
 
 06H 分支，将：
 ```c
@@ -383,7 +383,7 @@ static u8 Scr_SetReg(u16 a, u16 v)
                 if (r == 2) { Scr_Exc(fc, 0x03); return; } }
 ```
 
-- [ ] **Step 3.4: 03H/10H 数量上限放宽**（Task 1 质量审查第 1 条——屏引擎会把 0x0020~0x0037 连续 24 寄存器整块读/写，原上限会回异常导致时刻表读回/批量写失效）
+- [x] **Step 3.4: 03H/10H 数量上限放宽**（Task 1 质量审查第 1 条——屏引擎会把 0x0020~0x0037 连续 24 寄存器整块读/写，原上限会回异常导致时刻表读回/批量写失效）
 
 03H 分支，将：
 ```c
@@ -402,11 +402,11 @@ static u8 Scr_SetReg(u16 a, u16 v)
         if (q < 1 || q > 26 || s_rx[6] != (u8)(q << 1)) { Scr_Exc(fc, 0x03); return; }  /* 26=s_rx 64B 上限(11+2q<=64) */
 ```
 
-- [ ] **Step 3.5: 文件头注释同步**
+- [x] **Step 3.5: 文件头注释同步**
 
 将文件头职责注释里 `06H/10H 写 -> 屏下发流量/压力采集启停命令` 一行改为 `06H/10H 写 -> 采集使能/6路时刻表/屏RTC, 经 xCmdQueue 或直接入表`。
 
-- [ ] **Step 3.6: 提交**
+- [x] **Step 3.6: 提交**
 
 ```bash
 cd "D:/流量压力检测集成装置" && git add modbus6_rtos/screen.c && git commit -m "feat(screen): 从站写处理扩展(时刻表/RTC/总开关)+状态位图回读"
