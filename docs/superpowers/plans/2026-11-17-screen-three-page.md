@@ -30,7 +30,7 @@
 **Files:**
 - Modify: `modbus6_rtos/config_app.h`
 
-- [ ] **Step 1.1: 命令常量增加 ARM/DISARM**
+- [x] **Step 1.1: 命令常量增加 ARM/DISARM**
 
 将（约 105~109 行）：
 ```c
@@ -51,7 +51,7 @@
 #define CMD_SCHED_DISARM    6      /* 定时采集总开关: 取消并立即停止全部 */
 ```
 
-- [ ] **Step 1.2: 寄存器地址宏**
+- [x] **Step 1.2: 寄存器地址宏**
 
 将：
 ```c
@@ -74,7 +74,7 @@
 #define REG_TIME_BASE       0x0040   /* 7 寄存器: 年,月,日,时,分,秒,星期 (屏 Lua 每分钟写) */
 ```
 
-- [ ] **Step 1.3: extern 声明替换**
+- [x] **Step 1.3: extern 声明替换**
 
 将：
 ```c
@@ -92,7 +92,7 @@ extern u8  xdata g_time_valid;          /* 1=收到过屏的 RTC 喂时 */
 extern u8  xdata g_run[6];              /* 调度评估结果: 1=该路在采集窗口内 */
 ```
 
-- [ ] **Step 1.4: 寄存器映射注释表更新**
+- [x] **Step 1.4: 寄存器映射注释表更新**
 
 将 `/* 大彩屏寄存器映射表 (屏侧 VisualHMI 配置参考) ... */` 整块注释（0x0000~0x0019 那段，含【写寄存器 屏→MCU】两行）替换为：
 ```c
@@ -119,7 +119,7 @@ extern u8  xdata g_run[6];              /* 调度评估结果: 1=该路在采集
  *=============================================================*/
 ```
 
-- [ ] **Step 1.5: 提交**
+- [x] **Step 1.5: 提交**
 
 ```bash
 cd "D:/流量压力检测集成装置" && git add modbus6_rtos/config_app.h && git commit -m "feat(screen): 寄存器表扩展——定时采集总开关/6路时刻表/RTC喂时寄存器"
@@ -275,6 +275,20 @@ cd "D:/流量压力检测集成装置" && git add modbus6_rtos/sensors.c && git 
 
 **Files:**
 - Modify: `modbus6_rtos/screen.c`
+- Modify: `modbus6_rtos/config_app.h`（Step 3.0 微补充）
+
+- [ ] **Step 3.0: config_app.h 微补充**（Task 1 质量审查第 2/3/4 条）
+
+在 `#define REG_TIME_BASE 0x0040` 行之后追加：
+```c
+#define REG_SCHED_NUM       (6u * 4u)  /* 时刻表寄存器数 24 */
+#define REG_TIME_NUM        7u         /* RTC 寄存器数 */
+```
+映射注释表两行改为：
+```
+ *  0x0018    定时采集总开关  1=启用 0=取消并立即停 (读回=当前使能状态)
+ *  0x0040~46 屏RTC: 年(任意),月(1~12),日(1~31),时(0~23),分(0~59),秒(0~59),星期(1~7) 各U16 (main.lua 每分钟写)
+```
 
 - [ ] **Step 3.1: Scr_GetReg 增加读侧寄存器**
 
@@ -287,6 +301,8 @@ cd "D:/流量压力检测集成装置" && git add modbus6_rtos/sensors.c && git 
 ```
 替换为（`u8 st, idx;` 声明改为 `u8 st, idx, k;`）：
 ```c
+    /* 0x0018: 定时采集总开关读回 (屏变体/按钮状态显示用) */
+    if (a == REG_SCHED_ARM) return g_armed;
     /* 0x0016/0x0017: 总线级"任一路在采"回读 (预留) */
     if (a == 0x0016) return (u8)((g_run[0] | g_run[1] | g_run[2]) ? 1 : 0);
     if (a == 0x0017) return (u8)((g_run[3] | g_run[4] | g_run[5]) ? 1 : 0);
@@ -318,7 +334,7 @@ static u8 Scr_SetReg(u16 a, u16 v)
         return 1;
     }
     /* 0x0020~0x0037: 6 路时刻表 [开始时,开始分,停止时,停止分] */
-    if (a >= REG_SCHED_BASE && a < (REG_SCHED_BASE + 24u)) {
+    if (a >= REG_SCHED_BASE && a < (REG_SCHED_BASE + REG_SCHED_NUM)) {
         idx = (u8)((a - REG_SCHED_BASE) >> 2);        /* 通道 0~5 */
         off = (u8)((a - REG_SCHED_BASE) & 3u);        /* 0/2=时 1/3=分 */
         if (v > (u16)((off & 1u) ? 59u : 23u)) return 2;
@@ -328,7 +344,7 @@ static u8 Scr_SetReg(u16 a, u16 v)
         return 1;
     }
     /* 0x0040~0x0046: 屏 RTC (年,月,日,时,分,秒,星期) */
-    if (a >= REG_TIME_BASE && a < (REG_TIME_BASE + 7u)) {
+    if (a >= REG_TIME_BASE && a < (REG_TIME_BASE + REG_TIME_NUM)) {
         xSemaphoreTake(xDataMutex, portMAX_DELAY);
         g_time[a - REG_TIME_BASE] = v;
         g_time_valid = 1;
@@ -365,11 +381,30 @@ static u8 Scr_SetReg(u16 a, u16 v)
                 if (r == 2) { Scr_Exc(fc, 0x03); return; } }
 ```
 
-- [ ] **Step 3.4: 文件头注释同步**
+- [ ] **Step 3.4: 03H/10H 数量上限放宽**（Task 1 质量审查第 1 条——屏引擎会把 0x0020~0x0037 连续 24 寄存器整块读/写，原上限会回异常导致时刻表读回/批量写失效）
+
+03H 分支，将：
+```c
+        if (q < 1 || q > 16) { Scr_Exc(fc, 0x03); return; }  /* 数量超出范围 */
+```
+替换为：
+```c
+        if (q < 1 || q > 29) { Scr_Exc(fc, 0x03); return; }  /* 29=s_tx 64B 上限(3+2q+2<=64), 需容下时刻表整块 q=24 */
+```
+10H 分支，将：
+```c
+        if (q < 1 || q > 8 || s_rx[6] != (u8)(q << 1)) { Scr_Exc(fc, 0x03); return; }
+```
+替换为：
+```c
+        if (q < 1 || q > 26 || s_rx[6] != (u8)(q << 1)) { Scr_Exc(fc, 0x03); return; }  /* 26=s_rx 64B 上限(11+2q<=64) */
+```
+
+- [ ] **Step 3.5: 文件头注释同步**
 
 将文件头职责注释里 `06H/10H 写 -> 屏下发流量/压力采集启停命令` 一行改为 `06H/10H 写 -> 采集使能/6路时刻表/屏RTC, 经 xCmdQueue 或直接入表`。
 
-- [ ] **Step 3.5: 提交**
+- [ ] **Step 3.6: 提交**
 
 ```bash
 cd "D:/流量压力检测集成装置" && git add modbus6_rtos/screen.c && git commit -m "feat(screen): 从站写处理扩展(时刻表/RTC/总开关)+状态位图回读"
@@ -876,7 +911,7 @@ git -C "D:/VisualTFT_Project" add FlowPress && git -C "D:/VisualTFT_Project" com
 - [ ] **Step 8.4: 输入链路**：屏上改某路"开始时"→ 抓到 `06H 01 06 00 2X xx 00 CRC`（xx=0x20~0x37 内偏移）。
 - [ ] **Step 8.5: 按钮写值**（R6 必测）：按"采集"→ `01 06 00 18 00 01 <CRC>`；按"停止"→ `01 06 00 18 00 00 <CRC>`。若屏**不发**帧（R6 兑现），改用按钮外发原始帧方案：external_data_down 填 `01 06 00 18 00 01 48 07 ;` / `01 06 00 18 00 00 89 07 ;` 之前必须用标准 CRC 算法重算核对（勿抄 fattyWater 的错误样例）。
 - [ ] **Step 8.6: 定时闭环**：屏 RTC 喂时后（约 1 分钟内 0x0040 有值），设一路窗口=当前时刻±1 分钟→"采集"→ 到点 UART5/6 抓到该通道请求帧；过停止时刻帧消失。
-- [ ] **Step 8.7: 全部通过后**更新规格 §6 勾选状态、CLAUDE.md 当前状态段（`modbus6_rtos` 未联调 → 屏联调进展），提交。
+- [ ] **Step 8.7: 全部通过后**更新规格 §6 勾选状态、CLAUDE.md（当前状态段 + "0x0000~0x0019" 寄存器范围行改为 0x0000~0x0046——Task 1 质量审查第 2 条），提交。
 
 ---
 
