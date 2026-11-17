@@ -445,7 +445,7 @@ cd "D:/流量压力检测集成装置" && git add -A modbus6_rtos && git commit 
 - Create: `tools/gen_flowpress_screen.py`
 - 产出（不在本仓库）: `D:/VisualTFT_Project/FlowPress/` 下 `FlowPress.tftprj`、`标题页.tft`、`实时数据页.tft`、`定时采集页.tft`、`script.xml`、`main.lua`、`Images/`、`font/`
 
-- [ ] **Step 5.1: 写生成器**（完整文件如下）
+- [x] **Step 5.1: 写生成器**（完整文件如下）
 
 ```python
 # -*- coding: utf-8 -*-
@@ -705,14 +705,14 @@ if __name__ == "__main__":
 
 （生成器各页控件坐标与规格 §3.2 一致，仅第 3 页行起点从 y=70 调至 y=78 给表头留 18px——偏差已核对不影响布局。）
 
-- [ ] **Step 5.2: 运行生成器**
+- [x] **Step 5.2: 运行生成器**
 
 ```bash
 python -I "D:/流量压力检测集成装置/tools/gen_flowpress_screen.py"
 ```
 Expected: 打印 6 个"写 ..." 行 + `完成: D:/VisualTFT_Project/FlowPress`。
 
-- [ ] **Step 5.3: 核对产物树**
+- [x] **Step 5.3: 核对产物树**
 
 ```bash
 find "D:/VisualTFT_Project/FlowPress" -maxdepth 2 | head -20
