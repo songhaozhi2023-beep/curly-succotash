@@ -838,10 +838,10 @@ chk("BtnCollect" in btns and btns["BtnCollect"].get("button_style") == "3"
     and btns["BtnCollect"].get("bind_variant") == "采集使能", "采集按钮(置位写1)")
 chk("BtnStop" in btns and btns["BtnStop"].get("button_style") == "4"
     and btns["BtnStop"].get("bind_variant") == "采集使能", "停止按钮(复位写0)")
-nav = {it.get("name"): it for pg in roots.values()
-       for it in pg.iter("item") if it.get("type") == "button"
-       and it.get("switch")}
-swset = {it.get("switch") for it in nav.values()}
+nav = [(pg, it) for pg, rt in roots.items()
+       for it in rt.iter("item") if it.get("type") == "button"
+       and it.get("switch")]
+swset = {it.get("switch") for _, it in nav}
 chk(swset == {"实时数据页", "标题页", "定时采集页"}, f"导航切换目标: {swset}")
 
 # ---- 5. 字体存在 ----
