@@ -114,6 +114,13 @@ swset = {it.get("switch") for _, it in nav}
 chk(swset == {"实时数据页", "标题页", "定时采集页"}, f"导航切换目标: {swset}")
 for pg, it in nav:
     chk(it.get("button_type") == "0", f"{pg}/{it.get('name')} 切换按钮 button_type 应为 0")
+for pg, rt in roots.items():
+    for it in rt.iter("item"):
+        for k in ("url_up", "url_down"):
+            u = it.get(k, "")
+            if u:
+                chk(os.path.exists(os.path.join(ROOT, u.replace("\\", "/"))),
+                    f"{pg}/{it.get('name')} 缺图 {u}")
 
 # ---- 5. 字体存在 ----
 fids = {f.get("id") for f in fonts.iter("font")}

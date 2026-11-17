@@ -7,6 +7,7 @@ XML 字段模板逐字取自实样: D:/STM32_Project/fattyWater3.0/Project3/ 与
 D:/VisualTFT_Project/Project/ (水肥), 枚举经二进制 schema 核实(见规格 §3.3)。
 """
 import os, shutil, sys
+import zlib, struct
 
 ROOT     = r"D:/VisualTFT_Project/FlowPress"
 IMG_SRC  = r"D:/VisualTFT_Project/Project/images"
@@ -19,8 +20,39 @@ WHITE    = "255;255;255"
 FLOW_C   = "0;255;255";    FLOW_BG  = "18;44;72"
 PRESS_C  = "255;210;138";  PRESS_BG = "44;36;18"
 LINE_C   = "42;74;116"
-INP_FG   = "0;0;0";        INP_BG   = "255;255;255"
 GRAY     = "138;170;170"
+
+def _png_chunk(tag, data):
+    c = tag + data
+    return struct.pack(">I", len(data)) + c + struct.pack(">I", zlib.crc32(c) & 0xFFFFFFFF)
+
+def make_button_png(path, w, h, fill, border, radius=7, bw=2):
+    """深色主题按钮底图: 圆角矩形+描边, 角外全透明. fill/border=(r,g,b)."""
+    fr, fgc, fb = fill
+    br, bgc, bb = border
+    rows = []
+    for y in range(h):
+        row = bytearray([0])  # PNG filter type 0
+        for x in range(w):
+            dx = min(x, w - 1 - x); dy = min(y, h - 1 - y)
+            if dx < radius and dy < radius:
+                d = ((radius - dx) ** 2 + (radius - dy) ** 2) ** 0.5
+                cov = max(0.0, min(1.0, radius + 0.5 - d))
+                inner = max(0.0, min(1.0, radius - bw + 0.5 - d))
+            else:
+                cov = 1.0
+                inner = 1.0 if (dx >= bw and dy >= bw) else 0.0
+            if cov <= 0:
+                row += b"\x00\x00\x00\x00"; continue
+            if inner >= 1: r, g, b = fr, fgc, fb
+            else:          r, g, b = br, bgc, bb
+            row += bytes((r, g, b, round(255 * cov)))
+        rows.append(bytes(row))
+    png = (b"\x89PNG\r\n\x1a\n"
+           + _png_chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 6, 0, 0, 0))
+           + _png_chunk(b"IDAT", zlib.compress(b"".join(rows), 9))
+           + _png_chunk(b"IEND", b""))
+    open(path, "wb").write(png)
 
 # ---- 字体 (fonts.xml: 4=16px 6=20px 8=24px 12=32px 13=36px 17=52px) ----
 F_BIG, F_H1, F_LBL, F_VAL, F_SML, F_HDR = 17, 13, 8, 12, 6, 4
@@ -99,7 +131,7 @@ def wfile(path, content):
 def build_title():
     return page("标题页", [
         text_item(1, "Text1", "流量压力集成检测仪器", 80, 150, 640, 70, F_BIG, TITLE_C),
-        button_item(2, "BtnEnter", 355, 300, 90, 44, r"Images\btn.png", "进  入",
+        button_item(2, "BtnEnter", 355, 300, 90, 44, r"Images\btn_enter.png", "进  入",
                     style=0, switch="实时数据页", btype=0),
     ])
 
@@ -146,10 +178,12 @@ def build_sched():
     ]
     k = 10
     for r, y in enumerate(SROW):
+        rowfg = FLOW_C if r < 3 else PRESS_C
+        rowbg = FLOW_BG if r < 3 else PRESS_BG
         it.append(text_item(k, f"TextL{r+1}", SCHED_LBL[r], 16, y + 10, 90, 24, F_LBL, WHITE, align=0)); k += 1
         for c in range(4):   # 开始时/开始分/停止时/停止分
             it.append(display_item(k, f"Inp{r+1}_{c}", "0", 110 + c * 74, y, 64, 44,
-                                   F_LBL, INP_FG, INP_BG, bind=SCHED_V[r * 4 + c],
+                                   F_LBL, rowfg, rowbg, bind=SCHED_V[r * 4 + c],
                                    editable=True,
                                    vmax=(23 if c in (0, 2) else 59))); k += 1
         it.append(display_item(k, f"Val{r+1}", "0.000", 580, y, 200, 44, F_VAL,
@@ -221,7 +255,7 @@ end
 TFTPRJ = '''<?xml version="1.0" encoding="utf-8"?>
 <VisualTFT Name="FlowPress" OutputDirectory="output\\" StartupPage="标题页" StartupAction="" StartupActionLoop="1" DeviceType="21014" DeviceEnableControl="1" DeviceEnableTouchPane="1" DeviceEnableBuzzer="2" DeviceEnableCRC="0" DeviceBaudRate="3" DeviceCoordinateUpdateMode="4" DeviceControlNotify="3" DeviceScreenNotify="1" DeviceScreenRvs="0" DeviceBacklightAutoControl="0" DeviceBacklightTime="10" DeviceBacklightOn="200" DeviceBacklightOff="50" DeviceBacklightNotify="0" DeviceLockConfig="1" DeviceStartupVoice="0" DeviceVoiceVolume="100" DeviceEnableSlidingScreen="0" BeginSlidingScreen="" EndSlidingScreen="" CompatibleScreenRotate="1" AddResourceFloder="1" FastRefreshScreen="0" LUAPrecompile="0" DelayInitScreen="0" ImageDithering="1" ImageFormat="1" JPEGQuality="95" StartupLogo="" DHCP="0" IPAddress="192.168.1.100" NetMask="255.255.255.0" Gateway="192.168.1.1" DNS="192.168.1.1" NetworkMode="0" ServerAddress="192.168.1.200" ServicePort="5050" NetworkTransfer="0" WifiMode="0" WifiSSID="" WifiPassword="" FlashType="1" PartitionSize0="100" PartitionSize1="10" PartitionSize2="0" Repartition="1" FormatPartition="1" UartDownloadSpeed="0" PKGSetting="0" PKGControl="1" PKGImage="1" PKGFont="1" PKGOther="1" Version="1.0" EnableSlidingRange="0" EnableKeysound="0" BacklightAutoControl="0" BacklightNotify="0" StandbyPage="" ServerPort="5050" WifiSSI="">
   <Pages><Page RelativePath="标题页.tft"/><Page RelativePath="实时数据页.tft"/><Page RelativePath="定时采集页.tft"/></Pages>
-  <Images><Image RelativePath="Images\\btn.png" Download="0"/><Image RelativePath="Images\\btn_start.png" Download="0"/><Image RelativePath="Images\\btn_stop.png" Download="0"/></Images>
+  <Images><Image RelativePath="Images\\btn.png" Download="0"/><Image RelativePath="Images\\btn_enter.png" Download="0"/><Image RelativePath="Images\\btn_start.png" Download="0"/><Image RelativePath="Images\\btn_stop.png" Download="0"/></Images>
   <Waves/>
 </VisualTFT>'''
 
@@ -243,15 +277,11 @@ def main():
     fx = os.path.join(fdir, "fonts.xml")
     s = open(fx, encoding="utf-8").read().replace('ttf="msyh.ttf"', 'ttf="wqyMicroHei.ttf"')
     open(fx, "w", encoding="utf-8", newline="").write(s)
-    # 按钮底图 (来自水肥工程, 改 ASCII 名)
-    imgs = {r"按钮 (1).png": "btn.png",
-            r"开始按钮.png": "btn_start.png",
-            r"急停按钮.png": "btn_stop.png"}
-    for src, dst in imgs.items():
-        p = os.path.join(IMG_SRC, src)
-        if not os.path.exists(p):
-            sys.exit(f"缺素材: {p}")
-        shutil.copy(p, os.path.join(ROOT, "Images", dst))
+    # 深色主题按钮底图(程序生成, 与背景 15;30;50 同系)
+    make_button_png(os.path.join(ROOT, "Images", "btn.png"),        90, 36,  (24, 52, 86),  (72, 160, 224))
+    make_button_png(os.path.join(ROOT, "Images", "btn_enter.png"),  90, 44,  (24, 52, 86),  (72, 160, 224))
+    make_button_png(os.path.join(ROOT, "Images", "btn_start.png"), 110, 44,  (16, 58, 52),  (0, 210, 160))
+    make_button_png(os.path.join(ROOT, "Images", "btn_stop.png"),  110, 44,  (72, 26, 26),  (222, 90, 80))
     wfile(os.path.join(ROOT, "FlowPress.tftprj"), TFTPRJ)
     wfile(os.path.join(ROOT, "标题页.tft"), build_title())
     wfile(os.path.join(ROOT, "实时数据页.tft"), build_data())
