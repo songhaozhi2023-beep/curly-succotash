@@ -63,9 +63,11 @@ static void SenWait2ms(void)
  * 开始<停止 常规窗口 [s,e); 开始>停止 跨午夜 [s,1440)+[0,e) */
 static u8 Sched_WindowHit(u16 sh, u16 sm, u16 eh, u16 em, u16 nh, u16 nm)
 {
-    u16 s = (u16)(sh * 60u + sm);
-    u16 e = (u16)(eh * 60u + em);
-    u16 n = (u16)(nh * 60u + nm);
+    u16 s, e, n;
+    if (sh > 23u || sm > 59u || eh > 23u || em > 59u) return 0;  /* 值域防御: 非法输入不产生窗口 */
+    s = (u16)(sh * 60u + sm);
+    e = (u16)(eh * 60u + em);
+    n = (u16)(nh * 60u + nm);
     if (s == e) return 0;
     if (s < e)  return (u8)((n >= s) && (n < e));
     return (u8)((n >= s) || (n < e));
@@ -192,9 +194,9 @@ static void Sen_StartReq(void)
     u16 crc;
     u8 addr, k;
 
-    /* 采集窗口: 跳过不在窗口内的通道并标离线 (g_run 由本函数
-     * 调用方 Sched_UpdateRuns 每 10ms 刷新, u8 读取免锁, 竞争
-     * 后果仅是多跳/少跳一拍, 无数据一致性风险) */
+    /* 采集窗口: 跳过不在窗口内的通道并标离线。g_run 与本函数同在
+     * TaskSensor 上下文(写者=读者, 无竞争), u8 读取天然原子, 免锁安全;
+     * online 同为 u8 且此路是唯一写者(解析/超时路径也在本任务), 免锁良性 */
     for (k = 0; k < 6 && !g_run[m_cur]; k++) {
         g_sen[m_cur].online = 0;        /* 窗口外标离线, 屏显示断连 */
         m_cur = (u8)((m_cur + 1) % 6);
@@ -267,7 +269,7 @@ void Sensor_Poll(void)
         case CMD_PRESS_START: break;
         case CMD_PRESS_STOP:  break;
         case CMD_SCHED_ARM:   g_armed = 1; break;   /* 启用: 窗口内通道立即开采 */
-        case CMD_SCHED_DISARM: g_armed = 0; break;  /* 取消: 下次刷新全停 */
+        case CMD_SCHED_DISARM: g_armed = 0; break;  /* 取消: 本 tick 调度刷新即全停, 在途事务收尾 */
         }
     }
 
