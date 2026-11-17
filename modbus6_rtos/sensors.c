@@ -64,7 +64,8 @@ static void SenWait2ms(void)
 static u8 Sched_WindowHit(u16 sh, u16 sm, u16 eh, u16 em, u16 nh, u16 nm)
 {
     u16 s, e, n;
-    if (sh > 23u || sm > 59u || eh > 23u || em > 59u) return 0;  /* 值域防御: 非法输入不产生窗口 */
+    if (sh > 23u || sm > 59u || eh > 23u || em > 59u ||
+        nh > 23u || nm > 59u) return 0;  /* 值域防御: 时刻表与RTC时间非法均不产生窗口 */
     s = (u16)(sh * 60u + sm);
     e = (u16)(eh * 60u + em);
     n = (u16)(nh * 60u + nm);
