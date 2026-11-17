@@ -30,7 +30,8 @@
 
 - 屏 = **Modbus 主机**，轮询从机保持寄存器；轮询周期 200ms、开启"优化读取"（只读当前画面相关变量，标题页时不发数据轮询帧）
 - 固件 = 从站，已有 `screen.c`（03H 读 / 06H、10H 写）完整实现，本设计只**扩展寄存器表**
-- 时间来源：屏把自己的 RTC 周期写到从机（大彩"写入时间"逻辑），MCU 存下用于时刻比较；屏不在线则时间冻结（设备以屏为唯一交互源，可接受）
+- CRC：**标准 Modbus RTU（低字节在前）**——已核实（用户 fattyWater 工程的 `Crc16` 函数返回前交换了字节序，造成"高字节在前"假象；大彩引擎实际发标准帧），固件现有 `mb_crc16` 零改动
+- 时间来源：屏端 `main.lua` 每分钟把屏 RTC 写入从机（Lua `on_systick` + `set_variant`，与用户 Project3 工程同款已验证代码，同型号屏 DC80480DN070），MCU 存下用于时刻比较；屏不在线则时间冻结（设备以屏为唯一交互源，可接受）
 
 ## 3. 屏端工程
 
@@ -42,10 +43,10 @@
 D:/VisualTFT_Project/FlowPress/
 ├── FlowPress.tftprj        # DeviceType=21014 (DC80480DN070), StartupPage=标题页
 ├── 标题页.tft  实时数据页.tft  定时采集页.tft
-├── script.xml              # Modbus 协议 + 变量定义 (+写入时间逻辑, 见 §7 风险)
-├── Images/                 # 从水肥工程复制的按钮底图（按钮 (1).png / 按钮 (6).png 等）
+├── script.xml              # Modbus 协议 + 变量表（43 个 variant，无逻辑处理节点）
+├── Images/                 # 从水肥工程复制的按钮底图（按钮 (1).png / 开始按钮.png / 急停按钮.png）
 ├── font/fonts.xml          # 沿用 ASC_CHS 字体表 + msyh.ttf
-└── main.lua                # 空, 不用 Lua 脚本
+└── main.lua                # 每分钟把屏 RTC 喂给 MCU（寄存器 0x0040~0x0046，参照 Project3 已验证代码）
 ```
 
 ### 3.2 页面控件坐标（800×480）
@@ -79,12 +80,14 @@ D:/VisualTFT_Project/FlowPress/
 | 采集 button | 280,424,110,44 | 绑 0x0018 写变量，按下写 1 |
 | 停止 button | 410,424,110,44 | 绑 0x0018 写变量，按下写 0 |
 
-### 3.3 script.xml 要点
+### 3.3 script.xml 要点（枚举值已从 VisualTFT 二进制 schema/文档/编译产物三重核实）
 
-- 根节点参数（参照 fattyWater 格式）：`protocol="1"`（Modbus 主机）`slave="1"` `cycle_time="200"` `pool_delay_time="10"` `response_timeout="100"` `mulitple_read="16"` `screen_optimize="1"`
-- 变量表：6 个浮点读变量（§4 地址）、24 个 U16 写变量（时刻）、1 个 U16 写变量（0x0018 使能）、1 个 U16 读变量（0x001A 状态位图，预留）
-- 浮点"字节顺序"属性必须与固件大端字序匹配 —— 枚举值见 §7 风险 R1
-- "写入时间"逻辑：寄存器起始地址 0x0040（十进制 64），周期 1s
+- 根节点参数（参照 fattyWater 实样）：`protocol="1"`（1=Modbus 主机）`slave="1"` `cycle_time="200"` `pool_delay_time="10"` `pool_mode="1"` `response_timeout="100"` `mulitple_read="64"` `screen_optimize="0"`（**0=容许**优化读取）`save_data="0"` `enable_script="1"` `dgus_frame_head="23205"`；`<instructs/>` 留空
+- variant 关键枚举：`type="2"`=保持寄存器；`format="2"`=单精度浮点（0=短整型，4=字符串）；`byte_order="0"`="1234"=ABCD（高字在前+字内大端，**与固件 `Scr_FloatWord` 一致**）；`rw="0"`（fattyWater 全工程如此，含可写输入）；`length="16" byte_count="32"` 沿用工具默认，GUI 打开保存后由工具归一化
+- `.tftprj` 的 `DeviceBaudRate="3"`=9600（枚举 0=1200…3=9600…7=115200，指令集手册+编译产物 ctrlboard.ini 双重印证），与固件 UART8 一致
+- 时刻输入控件：`type="text_display"` + `input_mode="1"`（弹数字键盘）+ `text_type="0"` + `value_limit="1"` + max/min（时 23、分 59）
+- 采集/停止按钮：`bind_variant` + `button_type="1"` + `button_style="3"`(置位,按下写 1) / `"4"`(复位,按下写 0)，绑同一 0x0018 变量
+- RTC 喂时：**不用**"写入时间"逻辑节点（XML 格式无样例），改用 `main.lua` 每分钟 `set_variant` 写 0x0040~0x0046（Project3 同屏型号验证过的代码）
 
 ## 4. 寄存器映射（定稿，固件 config_app.h 注释同步更新）
 
@@ -102,7 +105,7 @@ D:/VisualTFT_Project/FlowPress/
 |---|---|---|
 | **0x0018** | **定时采集总开关（重定义，旧"流量/压力立即启停"废弃）** | 1=启用全部时刻表；0=取消并立即停止全部采集 |
 | **0x0020~0x0037** | 6 路×[开始时,开始分,停止时,停止分]，每路 4 个 U16：通道 i 的 4 个寄存器 = 0x0020+4*i | 时 0~23、分 0~59；开始==停止 视为该路窗口无效 |
-| **0x0040~0x0046** | 当前时间：年,月,日,星期,时,分,秒（各 1 个 U16，屏周期写入） | 屏"写入时间"功能写入 |
+| **0x0040~0x0046** | 当前时间：年,月,日,时,分,秒,星期（各 1 个 U16，屏 main.lua 每分钟写入） | 固件用时取 [3]=时 [4]=分 |
 
 ### 窗口判定（固件实现规则）
 - `g_run[i] = armed && time_valid && in_window(i)`，10ms 节拍在 TaskSensor 上下文评估（不在 ISR）
@@ -115,8 +118,7 @@ D:/VisualTFT_Project/FlowPress/
 |---|---|
 | `config_app.h` | 新增 REG_SCHED_BASE/REG_TIME_BASE/REG_COLLECT_MASK/REG_SCHED_ARM 定义；删除旧 0x0018/0x0019 语义注释；寄存器映射表注释整体更新 |
 | `screen.c` | `Scr_SetReg` 扩展：0x0020~0x0037 存 `g_sched[]`、0x0040~0x0046 存 `g_time[]` 并置 `g_time_valid`、0x0018 → xCmdQueue 入队 CMD_ARM/CMD_DISARM（写侧只入队不改状态，沿用现有模式）；`Scr_GetReg` 增加 0x001A |
-| `sensors.c` | 删 `g_collect_flow/g_collect_press` 全局标志 → `g_armed` + 每 10ms 由 `g_sched/g_time` 计算 `g_run[6]`；`Sensor_Poll` 只轮询 `g_run[i]` 为 1 的通道（流量 3 路共用 UART5、压力 3 路共用 UART6，按通道选站）；`Sensor_Init` 显式清零 `g_sched/g_time/g_run/g_armed`（沿用 EDATA 双保险惯例，新变量放 xdata） |
-| `main.c` | 命令处理增加 CMD_ARM/CMD_DISARM 分支（经 xCmdQueue） |
+| `sensors.c` | 删 `g_collect_flow/g_collect_press` 全局标志 → `g_armed` + 每 10ms 由 `g_sched/g_time` 计算 `g_run[6]`；`Sensor_Poll` 只轮询 `g_run[i]` 为 1 的通道（流量 3 路共用 UART5、压力 3 路共用 UART6，按通道选站）；`Sensor_Init` 显式清零 `g_sched/g_time/g_run/g_armed`（沿用 EDATA 双保险惯例，新变量放 xdata）。命令消费本来就在 `Sensor_Poll` 的队列分支里，`main.c` **零改动** |
 
 不变：float 大端拆字（`Scr_FloatWord`）、CRC、帧间隔判帧、DE 方向切换、采样系数。
 
@@ -127,10 +129,11 @@ D:/VisualTFT_Project/FlowPress/
 - 屏端：VisualTFT 打开工程 → 编译通过（需用户点一次 GUI；生成物在 output/）
 
 ### 联调验证（消除"单侧假设"）
-1. **float 字节序**：MCU 侧先让 0x0000 返回固定值 12.345f，屏模拟器（TFTSimulator.exe）或实屏显示 12.345 即字节序正确；显示异常则改屏端 byte_order 枚举重试（共 4 种组合，一次联调可穷尽）
-2. **轮询行为**：串口抓屏发来的 03H 请求帧，核对地址/数量/周期与 §4 一致
+1. **float 字节序**：byte_order="0"（ABCD）已由二进制 schema 核实且与固件一致；联调改为确认步骤——MCU 侧让 0x0000 返回固定值 12.345f，屏显示 12.345 即闭环。若显示异常再按 0→1→2→3 穷举 byte_order
+2. **轮询行为**：串口抓屏发来的 03H 请求帧，核对地址/数量/周期与 §4 一致；CRC 低字节在前（已核实大彩引擎为标准 RTU，抓包复核即可）
 3. **定时链路**：屏设窗口 → 写入时间到达 → 串口抓 UART5/6 出现该通道请求帧；停止后消失
-4. **输入链路**：屏改时刻值 → 抓 06H/10H 写帧 → 固件回读 `g_sched` 确认
+4. **输入链路**：屏改时刻值 → 抓 06H 写帧 → 固件回读 `g_sched` 确认
+5. **按钮写值**：按采集/停止 → 抓 06H 写 0x0018=1/0 帧（机制来自 schema 分析、本机无实样，此步必测；若引擎不写，兜底=按钮外发原始帧，CRC 由生成器按标准算法算）
 
 ### 验收标准
 - 第 1 页标题显示、进入/返回导航正常
@@ -141,11 +144,17 @@ D:/VisualTFT_Project/FlowPress/
 
 | # | 风险 | 对策 |
 |---|---|---|
-| R1 | 屏端 float 字节序枚举值（byte_order 填几）未知，fattyWater 无浮点先例 | §6 联调第 1 项穷举验证；CLAUDE.md 里的"单侧假设"就此关闭 |
-| R2 | 屏端波特率枚举（DeviceBaudRate="3" 是否=9600）未核实 | 实现时反查 VisualTFT 程序内字符串/文档；联调抓包即知 |
-| R3 | "写入时间"逻辑的 script.xml XML 节点格式无样例（fattyWater 未用逻辑处理） | 首选：从 VisualTFT 程序集字符串/文档反推；兜底：用户在 VisualTFT GUI"工具→协议与变量设置"里点两下配置（约 1 分钟），文档给出精确配置单 |
-| R4 | 数字输入控件 XML 属性（键盘类型/值限幅）无 fattyWater 直接样例（其设定值输入可参照） | 参照 fattyWater 设定值输入控件属性 + VisualTFT 打开校对 |
+| R1 | ~~float 字节序枚举值未知~~ **已解决**：byte_order="0"="1234"=ABCD，与固件一致（ScriptEditor 二进制串表证据）；联调第 1 项保留为确认步骤，CLAUDE.md 的"单侧假设"就此关闭 |
+| R2 | ~~波特率枚举未核实~~ **已解决**：DeviceBaudRate="3"=9600（schema+指令集手册+ctrlboard.ini 三重印证） |
+| R3 | ~~"写入时间"XML 格式无样例~~ **已解决**：弃用该节点，改 main.lua 喂 RTC（Project3 同屏型号已验证代码，`get_date_time`+`set_variant`+蔡勒星期） |
+| R4 | ~~数字输入控件属性未知~~ **已解决**：text_display + input_mode="1" 等（VisualTFT.exe 内嵌 schema + fattyWater 实样） |
 | R5 | `start>stop` 跨午夜窗口语义未经用户确认 | 已在 §4 明确规则，若不要此语义改为"窗口无效"，实现前一句话确认即可 |
+| R6 | 按钮"置位/复位写保持寄存器"机制来自 schema 分析、本机无实样（fattyWater 的原始帧按钮 CRC 还是错的，未采用） | 联调第 5 项必测；兜底=按钮外发原始帧（生成器按标准 CRC 计算） |
+| R7 | float 变量的 length/byte_count 属性无实样（全盘工程均为 16 位定点+factor 缩放） | GUI 打开→保存让工具归一化；若浮点显示确证不可用，退路=16 位定点+factor 缩放（factor 0.01，量程 0~655.35），固件侧改为发送 定点值 |
+
+### 修订记录
+- 2026-11-17 初稿（用户确认三页布局与定时语义）
+- 2026-11-17 调查修订：CRC 顺序核实为标准（fattyWater Crc16 返回前换序的假象）；时间来源从"写入时间"指令改为 main.lua 喂 RTC（0x0040~0x0046 顺序改为 年,月,日,时,分,秒,星期）；R1~R4 关闭，新增 R6/R7；main.c 零改动确认；script.xml 枚举值全部核实（§3.3）
 
 ## 8. 明确不做（本期）
 
