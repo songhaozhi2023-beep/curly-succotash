@@ -25,8 +25,11 @@ extern SemaphoreHandle_t xDataMutex;
 extern QueueHandle_t     xCmdQueue;
 
 sensor_t xdata g_sen[6];           /* 6路传感器数据: [0~2]=流量计 [3~5]=压力计 */
-u8 xdata g_collect_flow  = 0;      /* 流量采集开关: 1=运行中, 由屏写 0x0018 控制 */
-u8 xdata g_collect_press = 0;      /* 压力采集开关: 1=运行中, 由屏写 0x0019 控制 */
+u16 xdata g_sched[6][4];           /* 时刻表: [通道][开始时,开始分,停止时,停止分] */
+u16 xdata g_time[7];               /* 屏 RTC: [年,月,日,时,分,秒,星期] */
+u8  xdata g_armed      = 0;        /* 1=时刻表已启用 (屏写 0x0018=1) */
+u8  xdata g_time_valid = 0;        /* 1=收到过屏 RTC (Lua 每分钟写 0x0040~46) */
+u8  xdata g_run[6];                /* 调度结果: 1=该路在窗口内, Sensor_Poll 只轮询这些 */
 
 #define BUS_FLOW   0    /* 流量总线: UART5, 挂3个流量计 */
 #define BUS_PRESS  1    /* 压力总线: UART6, 挂3个压力计 */
@@ -53,6 +56,36 @@ static void SenWait2ms(void)
 {
     if (xTaskGetSchedulerState() == taskSCHEDULER_NOT_STARTED) CrudeMs(2);
     else vTaskDelay(2);
+}
+
+/*---------------- 定时采集调度 ----------------
+ * 窗口判定(纯函数, 无副作用): 开始==停止 无效;
+ * 开始<停止 常规窗口 [s,e); 开始>停止 跨午夜 [s,1440)+[0,e) */
+static u8 Sched_WindowHit(u16 sh, u16 sm, u16 eh, u16 em, u16 nh, u16 nm)
+{
+    u16 s = (u16)(sh * 60u + sm);
+    u16 e = (u16)(eh * 60u + em);
+    u16 n = (u16)(nh * 60u + nm);
+    if (s == e) return 0;
+    if (s < e)  return (u8)((n >= s) && (n < e));
+    return (u8)((n >= s) || (n < e));
+}
+
+/* 依 g_sched/g_time/g_armed 重算 g_run[6]。
+ * 调用方必须已持 xDataMutex。时间未同步或未启用时全 0。 */
+static void Sched_UpdateRuns(void)
+{
+    u8 i;
+    if (!g_armed || !g_time_valid) {
+        g_run[0] = 0; g_run[1] = 0; g_run[2] = 0;
+        g_run[3] = 0; g_run[4] = 0; g_run[5] = 0;
+        return;
+    }
+    for (i = 0; i < 6; i++) {
+        g_run[i] = Sched_WindowHit(g_sched[i][0], g_sched[i][1],
+                                   g_sched[i][2], g_sched[i][3],
+                                   g_time[3], g_time[4]);
+    }
 }
 
 /* 传感器总线初始化: 配置 3 路 485 端口方向、引脚模式、串口波特率 */
@@ -112,6 +145,16 @@ void Sensor_Init(void)
     m_retry = 0;
     m_t0    = 0;
 
+    /* 新增调度变量清零 (xdata 上电不定值, 沿用双保险惯例) */
+    for (i = 0; i < 6; i++) {
+        g_sched[i][0] = 0; g_sched[i][1] = 0;
+        g_sched[i][2] = 0; g_sched[i][3] = 0;
+        g_run[i] = 0;
+    }
+    for (i = 0; i < 7; i++) g_time[i] = 0;
+    g_armed = 0;
+    g_time_valid = 0;
+
     /* 初始所有传感器标记为离线 */
     for (i = 0; i < 6; i++) g_sen[i].online = 0;
 }
@@ -147,23 +190,16 @@ static void Sen_Send(u8 bus, u8 *f, u8 len)
 static void Sen_StartReq(void)
 {
     u16 crc;
-    u8 addr;
+    u8 addr, k;
 
-    /* 采集开关: 未开启的总线直接跳过并标离线 */
-    if (m_cur < 3) {
-        if (!g_collect_flow) {
-            g_sen[m_cur].online = 0;    /* 标离线, 屏上显示断连 */
-            m_cur = 3;                  /* 跳到压力总线第一个传感器 */
-        }
+    /* 采集窗口: 跳过不在窗口内的通道并标离线 (g_run 由本函数
+     * 调用方 Sched_UpdateRuns 每 10ms 刷新, u8 读取免锁, 竞争
+     * 后果仅是多跳/少跳一拍, 无数据一致性风险) */
+    for (k = 0; k < 6 && !g_run[m_cur]; k++) {
+        g_sen[m_cur].online = 0;        /* 窗口外标离线, 屏显示断连 */
+        m_cur = (u8)((m_cur + 1) % 6);
     }
-    if (m_cur >= 3) {
-        if (!g_collect_press) {
-            g_sen[m_cur].online = 0;
-            m_cur = 0;                  /* 跳回流量总线第一个传感器 */
-        }
-    }
-    /* 两条总线都关: 本轮不发请求, 等下个节拍 */
-    if ((m_cur < 3 && !g_collect_flow) || (m_cur >= 3 && !g_collect_press)) return;
+    if (k == 6) return;                 /* 六路全不在窗口内: 本轮不发请求 */
 
     /* 确定总线、从站地址、期望响应长度 */
     if (m_cur < 3) {
@@ -226,12 +262,19 @@ void Sensor_Poll(void)
     /* 处理屏发来的采集启停命令 (非阻塞, 队列空就跳过) */
     while (xQueueReceive(xCmdQueue, &cmd, 0) == pdTRUE) {
         switch (cmd) {
-        case CMD_FLOW_START:  g_collect_flow  = 1; break;
-        case CMD_FLOW_STOP:   g_collect_flow  = 0; break;
-        case CMD_PRESS_START: g_collect_press = 1; break;
-        case CMD_PRESS_STOP:  g_collect_press = 0; break;
+        case CMD_FLOW_START:  break;   /* 旧立即启停语义已废弃(空实现防旧屏) */
+        case CMD_FLOW_STOP:   break;
+        case CMD_PRESS_START: break;
+        case CMD_PRESS_STOP:  break;
+        case CMD_SCHED_ARM:   g_armed = 1; break;   /* 启用: 窗口内通道立即开采 */
+        case CMD_SCHED_DISARM: g_armed = 0; break;  /* 取消: 下次刷新全停 */
         }
     }
+
+    /* 每 10ms 依最新时刻表/RTC 重算各路采集窗口 */
+    xSemaphoreTake(xDataMutex, portMAX_DELAY);
+    Sched_UpdateRuns();
+    xSemaphoreGive(xDataMutex);
 
     /* 状态0: 发请求, 然后等下个节拍收响应 */
     if (m_state == 0) { Sen_StartReq(); return; }
