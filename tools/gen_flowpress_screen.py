@@ -231,6 +231,18 @@ def main():
     os.makedirs(os.path.join(ROOT, "Images"))
     # 字体整目录拷贝 (fonts.xml + 编译好的字库)
     shutil.copytree(FONT_SRC, os.path.join(ROOT, "font"))
+    # 矢量字库: 用本机 VisualTFT 自带的 wqyMicroHei (安装目录 truefont/),
+    # 覆盖 fonts.xml 的 msyh.ttf 声明(本机无此文件), 并双路径放置防查找落空
+    TF_SRC = r"D:/VisualTFT/VisualTFT/font/truefont/wqyMicroHei.ttf"
+    if not os.path.exists(TF_SRC):
+        sys.exit(f"缺素材: {TF_SRC}")
+    fdir = os.path.join(ROOT, "font")
+    os.makedirs(os.path.join(fdir, "truefont"))
+    shutil.copy(TF_SRC, os.path.join(fdir, "wqyMicroHei.ttf"))
+    shutil.copy(TF_SRC, os.path.join(fdir, "truefont", "wqyMicroHei.ttf"))
+    fx = os.path.join(fdir, "fonts.xml")
+    s = open(fx, encoding="utf-8").read().replace('ttf="msyh.ttf"', 'ttf="wqyMicroHei.ttf"')
+    open(fx, "w", encoding="utf-8", newline="").write(s)
     # 按钮底图 (来自水肥工程, 改 ASCII 名)
     imgs = {r"按钮 (1).png": "btn.png",
             r"开始按钮.png": "btn_start.png",
