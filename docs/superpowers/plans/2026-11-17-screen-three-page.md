@@ -132,7 +132,7 @@ cd "D:/流量压力检测集成装置" && git add modbus6_rtos/config_app.h && g
 **Files:**
 - Modify: `modbus6_rtos/sensors.c`
 
-- [ ] **Step 2.1: 全局变量替换**
+- [x] **Step 2.1: 全局变量替换**
 
 将：
 ```c
@@ -150,7 +150,7 @@ u8  xdata g_time_valid = 0;        /* 1=收到过屏 RTC (Lua 每分钟写 0x004
 u8  xdata g_run[6];                /* 调度结果: 1=该路在窗口内, Sensor_Poll 只轮询这些 */
 ```
 
-- [ ] **Step 2.2: 新增窗口判定与调度评估函数**
+- [x] **Step 2.2: 新增窗口判定与调度评估函数**
 
 在 `SenWait2ms` 函数之后、`Sensor_Init` 之前插入：
 ```c
@@ -159,9 +159,11 @@ u8  xdata g_run[6];                /* 调度结果: 1=该路在窗口内, Sensor
  * 开始<停止 常规窗口 [s,e); 开始>停止 跨午夜 [s,1440)+[0,e) */
 static u8 Sched_WindowHit(u16 sh, u16 sm, u16 eh, u16 em, u16 nh, u16 nm)
 {
-    u16 s = (u16)(sh * 60u + sm);
-    u16 e = (u16)(eh * 60u + em);
-    u16 n = (u16)(nh * 60u + nm);
+    u16 s, e, n;
+    if (sh > 23u || sm > 59u || eh > 23u || em > 59u) return 0;  /* 值域防御: 非法输入不产生窗口 */
+    s = (u16)(sh * 60u + sm);
+    e = (u16)(eh * 60u + em);
+    n = (u16)(nh * 60u + nm);
     if (s == e) return 0;
     if (s < e)  return (u8)((n >= s) && (n < e));
     return (u8)((n >= s) || (n < e));
@@ -185,7 +187,7 @@ static void Sched_UpdateRuns(void)
 }
 ```
 
-- [ ] **Step 2.3: Sensor_Init 清零新变量**
+- [x] **Step 2.3: Sensor_Init 清零新变量**
 
 在 `Sensor_Init` 中，紧挨 `m_state = 0;` 那段状态机清零之后（`/* 初始所有传感器标记为离线 */` 之前）插入：
 ```c
@@ -200,7 +202,7 @@ static void Sched_UpdateRuns(void)
     g_time_valid = 0;
 ```
 
-- [ ] **Step 2.4: Sen_StartReq 换成按通道跳过**
+- [x] **Step 2.4: Sen_StartReq 换成按通道跳过**
 
 将（152~166 行）：
 ```c
@@ -222,9 +224,9 @@ static void Sched_UpdateRuns(void)
 ```
 替换为（`u8 k;` 加到函数顶部现有声明区 `u8 addr;` 之后）：
 ```c
-    /* 采集窗口: 跳过不在窗口内的通道并标离线 (g_run 由本函数
-     * 调用方 Sched_UpdateRuns 每 10ms 刷新, u8 读取免锁, 竞争
-     * 后果仅是多跳/少跳一拍, 无数据一致性风险) */
+    /* 采集窗口: 跳过不在窗口内的通道并标离线。g_run 与本函数同在
+     * TaskSensor 上下文(写者=读者, 无竞争), u8 读取天然原子, 免锁安全;
+     * online 同为 u8 且此路是唯一写者(解析/超时路径也在本任务), 免锁良性 */
     for (k = 0; k < 6 && !g_run[m_cur]; k++) {
         g_sen[m_cur].online = 0;        /* 窗口外标离线, 屏显示断连 */
         m_cur = (u8)((m_cur + 1) % 6);
@@ -233,7 +235,7 @@ static void Sched_UpdateRuns(void)
 ```
 注意函数声明区改为 `u16 crc; u8 addr, k;`。
 
-- [ ] **Step 2.5: Sensor_Poll 队列分支与调度刷新**
+- [x] **Step 2.5: Sensor_Poll 队列分支与调度刷新**
 
 将队列处理 switch：
 ```c
@@ -252,7 +254,7 @@ static void Sched_UpdateRuns(void)
         case CMD_PRESS_START: break;
         case CMD_PRESS_STOP:  break;
         case CMD_SCHED_ARM:   g_armed = 1; break;   /* 启用: 窗口内通道立即开采 */
-        case CMD_SCHED_DISARM: g_armed = 0; break;  /* 取消: 下次刷新全停 */
+        case CMD_SCHED_DISARM: g_armed = 0; break;  /* 取消: 本 tick 调度刷新即全停, 在途事务收尾 */
         }
 ```
 并在 `while (xQueueReceive(...))` 循环结束后、`/* 状态0: 发请求 */` 之前插入：
@@ -263,7 +265,7 @@ static void Sched_UpdateRuns(void)
     xSemaphoreGive(xDataMutex);
 ```
 
-- [ ] **Step 2.6: 提交**
+- [x] **Step 2.6: 提交**
 
 ```bash
 cd "D:/流量压力检测集成装置" && git add modbus6_rtos/sensors.c && git commit -m "feat(sensor): 每通道定时采集窗口调度(g_sched/g_time/g_run)"
