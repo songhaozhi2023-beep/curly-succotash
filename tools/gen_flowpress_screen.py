@@ -129,7 +129,7 @@ def build_data():
     return page("实时数据页", it)
 
 SROW = (78, 135, 192, 249, 306, 363)   # 第3页行顶 (表头占 54~72)
-SCHED_V = tuple(f"{ch}{k}" for ch in FLOTV + PRESSV
+SCHED_V = tuple(f"{ch}{k}" for ch in ("流量1", "流量2", "流量3", "压力1", "压力2", "压力3")
                 for k in ("开始时", "开始分", "停止时", "停止分"))
 SCHED_LBL = FLOWN + PRESSN
 
