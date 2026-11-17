@@ -726,7 +726,7 @@ Expected: FlowPress.tftprj、3 个 .tft、script.xml、main.lua、Images/3 张�
 **Files:**
 - Create: `tools/validate_flowpress_screen.py`
 
-- [ ] **Step 6.1: 写校验器**（完整文件如下）
+- [x] **Step 6.1: 写校验器**（完整文件如下）
 
 ```python
 # -*- coding: utf-8 -*-
@@ -880,14 +880,14 @@ print(("FAIL %d 项:\n" % len(fails) + "\n".join(fails)) if fails else "PASS 全
 sys.exit(1 if fails else 0)
 ```
 
-- [ ] **Step 6.2: 运行校验**
+- [x] **Step 6.2: 运行校验**
 
 ```bash
 python -I "D:/流量压力检测集成装置/tools/validate_flowpress_screen.py"
 ```
 Expected: `PASS 全部通过`，退出码 0。任何 FAIL 逐条修生成器后重跑（改 Task 5 的 .py 再执行 Step 5.2——生成器有防覆盖保护，需先删 `D:/VisualTFT_Project/FlowPress`）。
 
-- [ ] **Step 6.3: 提交两仓库**
+- [x] **Step 6.3: 提交两仓库**
 
 ```bash
 cd "D:/流量压力检测集成装置" && git add tools/ && git commit -m "feat(tools): FlowPress 屏工程生成器+校验器"
