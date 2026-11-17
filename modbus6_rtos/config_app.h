@@ -107,11 +107,19 @@
 #define CMD_FLOW_STOP       2
 #define CMD_PRESS_START     3
 #define CMD_PRESS_STOP      4
+#define CMD_SCHED_ARM       5      /* 定时采集总开关: 启用全部时刻表 */
+#define CMD_SCHED_DISARM    6      /* 定时采集总开关: 取消并立即停止全部 */
 
 #define REG_PRESS_VALUE     0x0000
 #define REG_FLOW_INST       0x0030
 #define REG_FLOW_TOTAL      0x0031
 #define REG_DEV_ADDR        0x0100   /* 改地址寄存器, 流量计侧需核对 */
+
+/*---- 屏接口寄存器 (screen.c 用; 映射表详见表尾注释) ----*/
+#define REG_SCHED_ARM       0x0018   /* 屏写: 1=启用全部时刻表 0=取消并立即停止 */
+#define REG_COLLECT_MASK    0x001A   /* 屏读: bit0~5 各路当前是否在采集窗口内 */
+#define REG_SCHED_BASE      0x0020   /* 24 寄存器: 通道 i 的 [开始时,开始分,停止时,停止分] @ +4*i */
+#define REG_TIME_BASE       0x0040   /* 7 寄存器: 年,月,日,时,分,秒,星期 (屏 Lua 每分钟写) */
 
 /*================ 数据与接口 ================*/
 typedef struct {
@@ -122,40 +130,34 @@ typedef struct {
 } sensor_t;
 
 extern sensor_t xdata g_sen[6];         /* [0~2]=流量计1~3 [3~5]=压力计1~3 */
-extern u8 xdata g_collect_flow;         /* 1=流量采集运行中 */
-extern u8 xdata g_collect_press;        /* 1=压力采集运行中 */
+extern u16 xdata g_sched[6][4];         /* 时刻表 [通道][开始时,开始分,停止时,停止分] */
+extern u16 xdata g_time[7];             /* 屏 RTC [年,月,日,时,分,秒,星期] */
+extern u8  xdata g_armed;               /* 1=时刻表已启用(屏按过"采集") */
+extern u8  xdata g_time_valid;          /* 1=收到过屏的 RTC 喂时 */
+extern u8  xdata g_run[6];              /* 调度评估结果: 1=该路在采集窗口内 */
 
 /* RTOS 三件套定义在 main.c, extern 声明放在各 .c 文件 include FreeRTOS 头之后 */
 
 /*=============================================================
- * 大彩屏寄存器映射表 (屏侧 VisualHMI 配置参考)
- * 本机 Modbus 从站地址 = MB_ADDR_SCREEN (1)
- * 数据类型: FLOAT=4字节大端(占2个寄存器)  U16=2字节
+ * 大彩屏寄存器映射表 (屏侧 FlowPress 工程 script.xml 对应)
+ * 本机 Modbus 从站地址 = MB_ADDR_SCREEN (1)  9600 8N1
+ * 数据类型: FLOAT=4字节大端(占2寄存器,byte_order=0/ABCD)  U16
  *
- *  【读寄存器 屏←MCU】
- *  地址      内容                     类型    说明
- *  0x0000~1  流量计1 瞬时流量         FLOAT   m³/h
- *  0x0002~3  流量计2 瞬时流量         FLOAT   m³/h
- *  0x0004~5  流量计3 瞬时流量         FLOAT   m³/h
- *  0x0006~7  压力计1                  FLOAT   (单位待确认)
- *  0x0008~9  压力计2                  FLOAT   (单位待确认)
- *  0x000A~B  压力计3                  FLOAT   (单位待确认)
- *  0x000C    在线位图                 U16     bit0~5 对应传感器0~5, 1=在线
- *  0x0010~1  流量计1 累计流量         FLOAT   m³
- *  0x0012~3  流量计2 累计流量         FLOAT   m³
- *  0x0014~5  流量计3 累计流量         FLOAT   m³
- *  0x0016    流量采集运行状态         U16     1=采集中 0=已停止
- *  0x0017    压力采集运行状态         U16     1=采集中 0=已停止
+ *  【读寄存器 屏←MCU 03H】
+ *  0x0000~B  流量1~3瞬时/压力1~3        FLOAT
+ *  0x000C    在线位图 bit0~5            U16
+ *  0x0010~5  流量1~3 累计               FLOAT  (预留)
+ *  0x0016/7  流量/压力"任一路在采"回读   U16    (预留)
+ *  0x001A    采集状态位图 bit0~5         U16
  *
- *  【写寄存器 屏→MCU】
- *  地址      内容                     写入值
- *  0x0018    流量采集开关             1=启动, 0=停止
- *  0x0019    压力采集开关             1=启动, 0=停止
+ *  【写寄存器 屏→MCU 06H/10H】
+ *  0x0018    定时采集总开关  1=启用 0=取消并立即停
+ *  0x0020~37 6路x[开始时,开始分,停止时,停止分] 各U16 (时0~23 分0~59)
+ *  0x0040~46 屏RTC: 年,月,日,时,分,秒,星期 各U16 (main.lua 每分钟写)
  *
- *  【异常码】
- *  0x01  不支持的功能码
- *  0x02  非法寄存器地址
- *  0x03  非法数据(数量/长度)
+ *  窗口规则: run[i] = armed && time_valid && (开始<=now<停止),
+ *  开始==停止 视为无效窗口, 开始>停止 视为跨午夜窗口
+ *  【异常码】01=不支持功能码 02=非法地址 03=非法数据
  *=============================================================*/
 
 void Sensor_Init(void);
