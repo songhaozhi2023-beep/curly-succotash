@@ -53,9 +53,9 @@ def display_item(i, name, t, x, y, w, h, font, fg, bkg, bind="",
             f'condition_value="0"/>')
 
 def button_item(i, name, x, y, w, h, img, text, style=0, switch="", bind="",
-                font=F_LBL, fg=WHITE):
+                font=F_LBL, fg=WHITE, btype=1):
     e = esc(text)
-    return (f'<item name="{name}" id="{i}" type="button" button_type="1" '
+    return (f'<item name="{name}" id="{i}" type="button" button_type="{btype}" '
             f'focus="1" notify_disable="0" key_code="a" key_type="0" '
             f'init_state="0" button_style="{style}" longpress_delay="0" '
             f'url_down="{img}" url_up="{img}" popup_menu_id="0" '
@@ -100,7 +100,7 @@ def build_title():
     return page("标题页", [
         text_item(1, "Text1", "流量压力集成检测仪器", 80, 150, 640, 70, F_BIG, TITLE_C),
         button_item(2, "BtnEnter", 355, 300, 90, 44, r"Images\btn.png", "进  入",
-                    style=0, switch="实时数据页"),
+                    style=0, switch="实时数据页", btype=0),
     ])
 
 ROWS = (130, 242, 354)          # 第2页行顶
@@ -112,10 +112,10 @@ PRESSV = ("压力1", "压力2", "压力3")
 def build_data():
     it = [
         button_item(1, "BtnBack", 8, 10, 90, 36, r"Images\btn.png", "返 回",
-                    style=0, switch="标题页", font=F_SML),
+                    style=0, switch="标题页", font=F_SML, btype=0),
         text_item(2, "TextTitle", "流量压力集成检测仪器", 200, 10, 400, 44, F_H1, TITLE_C),
         button_item(3, "BtnSched", 702, 10, 90, 36, r"Images\btn.png", "定时设置",
-                    style=0, switch="定时采集页", font=F_SML),
+                    style=0, switch="定时采集页", font=F_SML, btype=0),
         text_item(4, "TextFH", "流量（m³/h）", 30, 68, 240, 26, F_LBL, FLOW_C, align=0),
         text_item(5, "TextPH", "压力（MPa）", 430, 68, 240, 26, F_LBL, PRESS_C, align=0),
         line_item(6, "LineSep", 400, 64, 400, 480),
@@ -136,7 +136,7 @@ SCHED_LBL = FLOWN + PRESSN
 def build_sched():
     it = [
         button_item(1, "BtnBack", 8, 10, 90, 36, r"Images\btn.png", "返 回",
-                    style=0, switch="实时数据页", font=F_SML),
+                    style=0, switch="实时数据页", font=F_SML, btype=0),
         text_item(2, "TextTitle", "定时采集设置", 200, 10, 400, 44, F_H1, TITLE_C),
         text_item(3, "HdS1", "开始 时", 100, 54, 80, 18, F_HDR, GRAY),
         text_item(4, "HdS2", "分", 180, 54, 64, 18, F_HDR, GRAY),
