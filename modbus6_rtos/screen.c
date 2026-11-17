@@ -4,8 +4,7 @@
  * 本机作为 Modbus-RTU 从站(地址=MB_ADDR_SCREEN=1), UART8
  * (9600 8N1, DE=P10.7)与大彩屏通信, 寄存器映射表见 config_app.h
  * 职责: 03H 读   -> 屏取 6 通道实时值/累计流量/在线状态
- *       06H/10H 写 -> 屏下发流量/压力采集启停命令, 经 xCmdQueue
- *                     转交 TaskSensor 执行(写侧只入队不改状态)
+ *       06H/10H 写 -> 采集使能/6路时刻表/屏RTC, 经 xCmdQueue 或直接入表
  * 收帧方式: TaskScreen 每 1ms 轮询 UART8 RI, 以 5 tick 帧间隔
  *           超时判定整帧结束(屏侧请求帧间隔远大于此阈值)
  *=============================================================*/
@@ -39,7 +38,7 @@ static u16 Scr_FloatWord(float f, u8 high)
  * 寄存器映射表见 config_app.h 注释 */
 static u16 Scr_GetReg(u16 a)
 {
-    u8 st, idx;
+    u8 st, idx, k;
 
     /* 0x0000~0x000B: 瞬时值 (float, 2 regs/通道) [0~2]=流量 [3~5]=压力 */
     if (a <= 0x000B) {
@@ -63,27 +62,50 @@ static u16 Scr_GetReg(u16 a)
         idx = (u8)((a - 0x0010) >> 1);
         return Scr_FloatWord(g_sen[idx].flow_total, (a & 1) ? 0 : 1);
     }
-    /* 0x0016/0x0017: 采集运行状态回读 (1=采集中 0=已停止) */
-    if (a == 0x0016) return g_collect_flow;
-    if (a == 0x0017) return g_collect_press;
+    /* 0x0018: 定时采集总开关读回 (屏变体/按钮状态显示用) */
+    if (a == REG_SCHED_ARM) return g_armed;
+    /* 0x0016/0x0017: 总线级"任一路在采"回读 (预留) */
+    if (a == 0x0016) return (u8)((g_run[0] | g_run[1] | g_run[2]) ? 1 : 0);
+    if (a == 0x0017) return (u8)((g_run[3] | g_run[4] | g_run[5]) ? 1 : 0);
+    /* 0x001A: 采集状态位图 bit0~5 */
+    if (a == REG_COLLECT_MASK) {
+        st = 0;
+        for (k = 0; k < 6; k++) {
+            if (g_run[k]) st |= (u8)(1u << k);
+        }
+        return st;
+    }
     return 0;   /* 未映射地址返回 0 */
 }
 
-/* 写寄存器: 屏通过写寄存器控制采集启停
- * 返回 1=成功 0=地址不合法 */
+/* 写寄存器: 屏写采集使能/时刻表/RTC
+ * 返回 1=成功 0=地址不合法 2=数据值不合法 */
 static u8 Scr_SetReg(u16 a, u16 v)
 {
-    u8 cmd;
-    /* 0x0018: 流量采集开关 (v=1启动, v=0停止) */
-    if (a == 0x0018) {
-        cmd = v ? CMD_FLOW_START : CMD_FLOW_STOP;
+    u8 cmd, idx, off;
+
+    /* 0x0018: 定时采集总开关 (1=启用全部时刻表 0=取消并立即停) */
+    if (a == REG_SCHED_ARM) {
+        cmd = v ? CMD_SCHED_ARM : CMD_SCHED_DISARM;
         xQueueSend(xCmdQueue, &cmd, 0);   /* 非阻塞发送, 队列满则丢弃 */
         return 1;
     }
-    /* 0x0019: 压力采集开关 */
-    if (a == 0x0019) {
-        cmd = v ? CMD_PRESS_START : CMD_PRESS_STOP;
-        xQueueSend(xCmdQueue, &cmd, 0);
+    /* 0x0020~0x0037: 6 路时刻表 [开始时,开始分,停止时,停止分] */
+    if (a >= REG_SCHED_BASE && a < (REG_SCHED_BASE + REG_SCHED_NUM)) {
+        idx = (u8)((a - REG_SCHED_BASE) >> 2);        /* 通道 0~5 */
+        off = (u8)((a - REG_SCHED_BASE) & 3u);        /* 0/2=时 1/3=分 */
+        if (v > (u16)((off & 1u) ? 59u : 23u)) return 2;
+        xSemaphoreTake(xDataMutex, portMAX_DELAY);
+        g_sched[idx][off] = v;
+        xSemaphoreGive(xDataMutex);
+        return 1;
+    }
+    /* 0x0040~0x0046: 屏 RTC (年,月,日,时,分,秒,星期) */
+    if (a >= REG_TIME_BASE && a < (REG_TIME_BASE + REG_TIME_NUM)) {
+        xSemaphoreTake(xDataMutex, portMAX_DELAY);
+        g_time[a - REG_TIME_BASE] = v;
+        g_time_valid = 1;
+        xSemaphoreGive(xDataMutex);
         return 1;
     }
     return 0;
@@ -140,7 +162,7 @@ static void Scr_Process(void)
         if (s_len != 8) return;                     /* 请求帧固定 8 字节 */
         a = ((u16)s_rx[2] << 8) | s_rx[3];          /* 起始地址 */
         q = ((u16)s_rx[4] << 8) | s_rx[5];          /* 读取数量 */
-        if (q < 1 || q > 16) { Scr_Exc(fc, 0x03); return; }  /* 数量超出范围 */
+        if (q < 1 || q > 29) { Scr_Exc(fc, 0x03); return; }  /* 29=s_tx 64B 上限(3+2q+2<=64), 需容下时刻表整块 q=24 */
         s_tx[0] = MB_ADDR_SCREEN;
         s_tx[1] = fc;
         s_tx[2] = (u8)(q << 1);                     /* 字节数 = 寄存器数*2 */
@@ -164,7 +186,11 @@ static void Scr_Process(void)
         if (s_len != 8) return;
         a = ((u16)s_rx[2] << 8) | s_rx[3];          /* 寄存器地址 */
         v = ((u16)s_rx[4] << 8) | s_rx[5];          /* 写入值 */
-        if (!Scr_SetReg(a, v)) { Scr_Exc(fc, 0x02); return; }  /* 非法地址 */
+        {                       /* 0=非法地址 2=非法数据值 */
+            u8 r = Scr_SetReg(a, v);
+            if (r == 0) { Scr_Exc(fc, 0x02); return; }
+            if (r == 2) { Scr_Exc(fc, 0x03); return; }
+        }
         Scr_Send(s_rx, 8);                           /* 正常: 原样回显请求帧 */
     }
     /* 功能码 10H: 写多个寄存器 */
@@ -172,11 +198,14 @@ static void Scr_Process(void)
         if (s_len < 11) return;
         a = ((u16)s_rx[2] << 8) | s_rx[3];          /* 起始地址 */
         q = ((u16)s_rx[4] << 8) | s_rx[5];          /* 寄存器数量 */
-        if (q < 1 || q > 8 || s_rx[6] != (u8)(q << 1)) { Scr_Exc(fc, 0x03); return; }
+        if (q < 1 || q > 26 || s_rx[6] != (u8)(q << 1)) { Scr_Exc(fc, 0x03); return; }  /* 26=s_rx 64B 上限(11+2q<=64) */
         if (s_len != (u8)(9 + s_rx[6])) return;     /* 长度校验 */
         for (i = 0; i < (u8)q; i++) {
             v = ((u16)s_rx[7 + (u8)(i << 1)] << 8) | s_rx[8 + (u8)(i << 1)];
-            if (!Scr_SetReg((u16)(a + i), v)) { Scr_Exc(fc, 0x02); return; }
+            {   u8 r = Scr_SetReg((u16)(a + i), v);
+                if (r == 0) { Scr_Exc(fc, 0x02); return; }  /* 注: 多写中途
+                非法值会留下半截数据; 屏端键盘已限幅, 此路径仅防异常帧 */
+                if (r == 2) { Scr_Exc(fc, 0x03); return; } }
         }
         /* 正常应答: 回显地址+数量 */
         s_tx[0] = MB_ADDR_SCREEN;
