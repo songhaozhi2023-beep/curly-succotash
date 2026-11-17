@@ -16,3 +16,4 @@ stc-isp6.96z/
 # 本地工具缓存
 .em_skill.json
 __pycache__/
+.superpowers/
