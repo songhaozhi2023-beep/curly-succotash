@@ -416,14 +416,14 @@ cd "D:/流量压力检测集成装置" && git add modbus6_rtos/screen.c && git c
 
 ### Task 4: 固件全量构建验证
 
-- [ ] **Step 4.1: 全量重建**
+- [x] **Step 4.1: 全量重建**
 
 ```bash
 "D:/keil5C251/UV4/UV4.exe" -j0 -r "D:/流量压力检测集成装置/modbus6_rtos/FreeRTOS_STC32G12K.uvproj" -o "D:/流量压力检测集成装置/modbus6_rtos/build_flowpress.log"
 ```
 （命令立即返回属正常，等 1~2 分钟后看日志；也可用 build-keil skill。）
 
-- [ ] **Step 4.2: 检查日志**
+- [x] **Step 4.2: 检查日志**
 
 ```bash
 grep -E "Error|Warning|0 Error" "D:/流量压力检测集成装置/modbus6_rtos/build_flowpress.log" | tail -5
