@@ -84,8 +84,11 @@ static u8 Scr_SetReg(u16 a, u16 v)
 {
     u8 cmd, idx, off;
 
-    /* 0x0018: 定时采集总开关 (1=启用全部时刻表 0=取消并立即停) */
+    /* 0x0018: 定时采集总开关 (1=启用全部时刻表 0=取消并立即停)
+     * 注: 写"成功"仅指已入队, 经命令队列异步生效(延迟<=2 tick);
+     * 读回 g_armed 为异步值, 权威实时状态看 0x001A 位图 */
     if (a == REG_SCHED_ARM) {
+        if (v > 1u) return 2;             /* 仅接受 0/1 */
         cmd = v ? CMD_SCHED_ARM : CMD_SCHED_DISARM;
         xQueueSend(xCmdQueue, &cmd, 0);   /* 非阻塞发送, 队列满则丢弃 */
         return 1;
@@ -100,7 +103,9 @@ static u8 Scr_SetReg(u16 a, u16 v)
         xSemaphoreGive(xDataMutex);
         return 1;
     }
-    /* 0x0040~0x0046: 屏 RTC (年,月,日,时,分,秒,星期) */
+    /* 0x0040~0x0046: 屏 RTC (年,月,日,时,分,秒,星期)
+     * 注: 10H 多写逐寄存器持锁, 中间态可被调度器看到(新时+旧分),
+     * 后果<=1 tick, 与"在途事务收尾"同量级, 接受; 勿误判为竞态 bug */
     if (a >= REG_TIME_BASE && a < (REG_TIME_BASE + REG_TIME_NUM)) {
         xSemaphoreTake(xDataMutex, portMAX_DELAY);
         g_time[a - REG_TIME_BASE] = v;
@@ -198,7 +203,7 @@ static void Scr_Process(void)
         if (s_len < 11) return;
         a = ((u16)s_rx[2] << 8) | s_rx[3];          /* 起始地址 */
         q = ((u16)s_rx[4] << 8) | s_rx[5];          /* 寄存器数量 */
-        if (q < 1 || q > 26 || s_rx[6] != (u8)(q << 1)) { Scr_Exc(fc, 0x03); return; }  /* 26=s_rx 64B 上限(11+2q<=64) */
+        if (q < 1 || q > 26 || s_rx[6] != (u8)(q << 1)) { Scr_Exc(fc, 0x03); return; }  /* 26=s_rx 64B 上限(9+2q<=64), 保守 1 */
         if (s_len != (u8)(9 + s_rx[6])) return;     /* 长度校验 */
         for (i = 0; i < (u8)q; i++) {
             v = ((u16)s_rx[7 + (u8)(i << 1)] << 8) | s_rx[8 + (u8)(i << 1)];
