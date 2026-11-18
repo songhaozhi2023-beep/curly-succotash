@@ -50,6 +50,8 @@ expect = {"流量1瞬时": 0, "流量2瞬时": 2, "流量3瞬时": 4,
           "压力1": 6, "压力2": 8, "压力3": 10,
           "在线位图": 12, "流量1累计": 16, "流量2累计": 18, "流量3累计": 20,
           "采集使能": 24, "采集状态": 26,
+          "流量1平均": 80, "流量2平均": 82, "流量3平均": 84,
+          "压力1平均": 86, "压力2平均": 88, "压力3平均": 90,
           "RTC年": 64, "RTC月": 65, "RTC日": 66, "RTC时": 67,
           "RTC分": 68, "RTC秒": 69, "RTC星期": 70}
 for n, a in expect.items():
@@ -59,15 +61,18 @@ for ci, ch in enumerate(chn):
     for ki, k in enumerate(("开始时", "开始分", "停止时", "停止分")):
         n = ch + k
         chk(n in addr and addr[n] == 32 + ci * 4 + ki, f"时刻变量 {n} 地址")
-chk(len(vs) == 43, f"variant 数 {len(vs)} != 43")
+chk(len(vs) == 49, f"variant 数 {len(vs)} != 49")
 addrs = [v.get("addr") for v in vs]
 chk(len(addrs) == len(set(addrs)), "变量地址有重复")
 for v in vs:
     chk(v.get("type") == "2" and v.get("rw") == "0" and v.get("byte_order") == "0",
         f"变量 {v.get('name')} type/rw/byte_order 不符")
 for n in ("流量1瞬时", "流量2瞬时", "流量3瞬时", "压力1", "压力2", "压力3",
-          "流量1累计", "流量2累计", "流量3累计"):
-    chk(names[n].get("format") == "2", f"{n} format != 2 (浮点)")
+          "流量1累计", "流量2累计", "流量3累计",
+          "流量1平均", "流量2平均", "流量3平均",
+          "压力1平均", "压力2平均", "压力3平均"):
+    v = names.get(n)
+    chk(v is not None and v.get("format") == "2", f"{n} 缺失或 format != 2 (浮点)")
 for n in ("RTC年", "RTC月", "RTC日", "RTC时", "RTC分", "RTC秒", "RTC星期"):
     chk(n in names, f"缺 RTC 变量 {n} (main.lua set_variant 需要同名)")
 
@@ -93,6 +98,12 @@ disp3 = [it for it in roots["定时采集页"].iter("item")
          if it.get("type") == "text_display" and it.get("input_mode") == "0"]
 chk(len([d for d in disp3 if d.get("bind_variant")]) == 6,
     f"定时采集页数值框 {len(disp3)} != 6")
+inst_v = {"流量1瞬时", "流量2瞬时", "流量3瞬时", "压力1", "压力2", "压力3"}
+avg_v = {"流量1平均", "流量2平均", "流量3平均", "压力1平均", "压力2平均", "压力3平均"}
+b2 = {d.get("bind_variant") for d in disp2}
+chk(b2 == inst_v, f"实时数据页数值框应绑瞬时变体, 实为 {b2}")
+b3 = {d.get("bind_variant") for d in disp3}
+chk(b3 == avg_v, f"定时采集页数值框应绑平均变体, 实为 {b3}")
 inp = [it for it in roots["定时采集页"].iter("item")
        if it.get("type") == "text_display" and it.get("input_mode") == "1"]
 chk(len(inp) == 24, f"输入框 {len(inp)} != 24")

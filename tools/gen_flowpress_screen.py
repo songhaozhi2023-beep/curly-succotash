@@ -164,6 +164,7 @@ SROW = (78, 135, 192, 249, 306, 363)   # 第3页行顶 (表头占 54~72)
 SCHED_V = tuple(f"{ch}{k}" for ch in ("流量1", "流量2", "流量3", "压力1", "压力2", "压力3")
                 for k in ("开始时", "开始分", "停止时", "停止分"))
 SCHED_LBL = FLOWN + PRESSN
+AVGV = tuple(f"{ch}平均" for ch in ("流量1", "流量2", "流量3", "压力1", "压力2", "压力3"))
 
 def build_sched():
     it = [
@@ -174,7 +175,7 @@ def build_sched():
         text_item(4, "HdS2", "分", 180, 54, 64, 18, F_HDR, GRAY),
         text_item(5, "HdE1", "停止 时", 262, 54, 80, 18, F_HDR, GRAY),
         text_item(6, "HdE2", "分", 342, 54, 64, 18, F_HDR, GRAY),
-        text_item(7, "HdV", "实时值", 580, 54, 200, 18, F_HDR, GRAY),
+        text_item(7, "HdV", "平均值", 580, 54, 200, 18, F_HDR, GRAY),
     ]
     k = 10
     for r, y in enumerate(SROW):
@@ -189,7 +190,7 @@ def build_sched():
         it.append(display_item(k, f"Val{r+1}", "0.000", 580, y, 200, 44, F_VAL,
                                FLOW_C if r < 3 else PRESS_C,
                                FLOW_BG if r < 3 else PRESS_BG,
-                               bind=(FLOTV + PRESSV)[r])); k += 1
+                               bind=AVGV[r])); k += 1
     it.append(button_item(k, "BtnCollect", 280, 424, 110, 44, r"Images\btn_start.png", "采 集",
                           style=3, bind="采集使能", font=F_LBL)); k += 1
     it.append(button_item(k + 1, "BtnStop", 410, 424, 110, 44, r"Images\btn_stop.png", "停 止",
@@ -209,7 +210,13 @@ def build_script():
          variant("流量2累计", 18, fmt=2, dec=3, txtfmt=1),
          variant("流量3累计", 20, fmt=2, dec=3, txtfmt=1),
          variant("采集使能", 24),
-         variant("采集状态", 26)]
+         variant("采集状态", 26),
+         variant("流量1平均", 80, fmt=2, dec=3, txtfmt=1),
+         variant("流量2平均", 82, fmt=2, dec=3, txtfmt=1),
+         variant("流量3平均", 84, fmt=2, dec=3, txtfmt=1),
+         variant("压力1平均", 86, fmt=2, dec=3, txtfmt=1),
+         variant("压力2平均", 88, fmt=2, dec=3, txtfmt=1),
+         variant("压力3平均", 90, fmt=2, dec=3, txtfmt=1)]
     v += [variant(n, 32 + i) for i, n in enumerate(SCHED_V)]
     v += [variant(n, 64 + i) for i, n in
           enumerate(("RTC年", "RTC月", "RTC日", "RTC时", "RTC分", "RTC秒", "RTC星期"))]
