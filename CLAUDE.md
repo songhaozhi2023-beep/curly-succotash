@@ -44,4 +44,4 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **git 仓库零提交、无远程**——所有文件未跟踪。首次大改动前建议先做初始提交。
 - `modbus6_rtos`：编译 0 错 0 警，**尚未上板联调**。待办：S5CFG/S6CFG 波特率时钟源默认值待真机确认（config_app.h 注释标明）；传感器浮点系数"到货后按实测修正"（config_app.h）；彩屏寄存器表与 float 大端是按 VisualHMI 的单侧假设；485 发送等待用固定 2ms/判帧 5 tick 未验证。
 - 线 A README 有三处过时（代码为准）：ADC 结果格式已改 `(ADC_RES<<4)|(ADC_RESL>>4)`；蜂鸣器实际在 PA.0（P5.5 是基础版网标残留）；uvproj 文件名笔误（见上）。
-- 线 B 的 Modbus 寄存器映射定义在 `config_app.h` 注释（0x0000~0x0019），CRC16 在 `mb_crc.c`（0xA001 低字节先发）。
+- 线 B 的 Modbus 寄存器映射定义在 `config_app.h` 注释（0x0000~0x005B，0x0050~0x005B 为六路采集窗口平均值），CRC16 在 `mb_crc.c`（0xA001 低字节先发）。
