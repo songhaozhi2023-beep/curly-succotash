@@ -62,6 +62,12 @@ static u16 Scr_GetReg(u16 a)
         idx = (u8)((a - 0x0010) >> 1);
         return Scr_FloatWord(g_sen[idx].flow_total, (a & 1) ? 0 : 1);
     }
+    /* 0x0050~0x005B: 六路采集窗口平均值 (float 大端, 2 regs/通道)
+     * 窗口内=动态平均, 出窗冻结, 零样本窗口=0; 调用方 03H 已持 xDataMutex */
+    if (a >= REG_AVG_BASE && a < (REG_AVG_BASE + REG_AVG_NUM)) {
+        idx = (u8)((a - REG_AVG_BASE) >> 1);
+        return Scr_FloatWord(g_avg[idx], (a & 1) ? 0 : 1);
+    }
     /* 0x0018: 定时采集总开关读回 (屏变体/按钮状态显示用) */
     if (a == REG_SCHED_ARM) return g_armed;
     /* 0x0016/0x0017: 总线级"任一路在采"回读 (预留) */
