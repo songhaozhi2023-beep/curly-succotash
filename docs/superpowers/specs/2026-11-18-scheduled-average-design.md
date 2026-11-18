@@ -53,8 +53,7 @@ Sensor_Poll 每 10ms ─> Sched_UpdateRuns() 后开窗判定(消抖): 连续离�
 - 递推平均（Welford 简化式）`avg += (v - avg) / n`，float 32 位 + u32 计数。
   每路约 5~10 样本/秒，数小时窗口 ~1e5 样本，3 位小数显示精度无碍
   （n>1e6 增量才可能低于 float ulp 失步，本应用不可达）。
-- 并发：`g_avg/m_smp/m_prev` 与 `g_run` 同在 TaskSensor 上下文（唯一写者=读者，免锁，
-  沿用 g_run 注释惯例）；`g_avg` 供屏读走 03H 路径既有 xDataMutex 保护，float 两字一致。
+- 并发：`m_out/m_smp` 任务私有免锁；`g_avg` 的所有写入（递推与开窗清零）均持 xDataMutex，屏读走 03H 路径同一把锁，float 两字一致。
 - 开窗清零经 5 tick 消抖：≤50ms 的窗口抖动（RTC 整点喂时中间态、采集中改写时刻表的瞬时过窗）不产生清零；真实离窗≥50ms 后的进窗恰好清零一次（即期望行为）。
 
 ## 5. 寄存器变更
@@ -73,7 +72,7 @@ Sensor_Poll 每 10ms ─> Sched_UpdateRuns() 后开窗判定(消抖): 连续离�
 | 文件 | 改动 |
 |---|---|
 | `config_app.h` | `REG_AVG_BASE 0x0050` / `REG_AVG_NUM (6u*2u)`；`extern float xdata g_avg[6]`；映射表注释加 0x0050~0x005B 行 |
-| `sensors.c` | 定义 `float xdata g_avg[6]`、`static u32 xdata m_smp[6]`、`static u8 xdata m_prev[6]`（全 xdata 显式段，避开 EDATA 清零坑；`Sensor_Init` 显式清零双保险）；`Sensor_Poll` 在 `Sched_UpdateRuns()` 后做上升沿检测；`Sen_Parse` 既有锁内按 `g_run[m_cur]` 门控递推（流量取 flow_inst、压力取 press） |
+| `sensors.c` | 定义 `float xdata g_avg[6]`、`static u32 xdata m_smp[6]`、`static u8 xdata m_out[6]` 与 `AVG_CLEAR_GRACE_TICKS 5u`（全 xdata 显式段，避开 EDATA 清零坑；`Sensor_Init` 显式清零双保险）；`Sensor_Poll` 在 `Sched_UpdateRuns()` 后做消抖开窗判定（连续离窗≥5 tick 的进窗才清零，清零持锁）；`Sen_Parse` 既有锁内按 `g_run[m_cur]` 门控递推（流量取 flow_inst、压力取 press） |
 | `screen.c` | `Scr_GetReg` 加 0x0050~0x005B 分支（03H 调用方已持锁） |
 | `tools/gen_flowpress_screen.py` | 列头"实时值"→"平均值"（固化用户手改；重新生成覆盖 .tft，文本一致无损失）；`build_script()` 加 6 个平均变体 @80..90；第 3 页 `Val1~6` 改绑平均变体 |
 | `tools/validate_flowpress_screen.py` | expect 表加 6 个平均变体 @80..90；变体总数断言 43→49；浮点 format=2 断言补平均名；新增断言：第 3 页 6 个数值框绑定的全是平均变体、第 2 页 6 个数值框绑定的全是瞬时变体（本次差异点入断言防回归） |

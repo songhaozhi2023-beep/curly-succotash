@@ -300,7 +300,7 @@ void Sensor_Poll(void)
     Sched_UpdateRuns();
     xSemaphoreGive(xDataMutex);
 
-    /* 平均值开窗判定(消抖): 连续离窗超过 AVG_CLEAR_GRACE_TICKS 后再进窗,
+    /* 平均值开窗判定(消抖): 连续离窗达到 AVG_CLEAR_GRACE_TICKS 后再进窗,
      * 才视为真实开窗并清零重算。背景: 屏 main.lua 每分钟逐寄存器喂 RTC,
      * 整点先写"时"后写"分", 调度器会看到 (新时+旧59分) 中间态, 使跨整点
      * 窗口抖动 1~2 tick——不消抖会把已累积的平均值清掉; 真实窗口间隔以
