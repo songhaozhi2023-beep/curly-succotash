@@ -30,6 +30,9 @@ u16 xdata g_time[7];               /* 屏 RTC: [年,月,日,时,分,秒,星期] 
 u8  xdata g_armed      = 0;        /* 1=时刻表已启用 (屏写 0x0018=1) */
 u8  xdata g_time_valid = 0;        /* 1=收到过屏 RTC (Lua 每分钟写 0x0040~46) */
 u8  xdata g_run[6];                /* 调度结果: 1=该路在窗口内, Sensor_Poll 只轮询这些 */
+float xdata g_avg[6];              /* 各路窗口平均值: 窗口内动态递推, 出窗冻结(屏读 0x0050~5B) */
+static u32 xdata m_smp[6];         /* 本窗口已计入样本数 (递推平均分母) */
+static u8  xdata m_prev_run[6];    /* 上个 tick 的 g_run 快照: 0→1 上升沿=开窗, 清零重算 */
 
 #define BUS_FLOW   0    /* 流量总线: UART5, 挂3个流量计 */
 #define BUS_PRESS  1    /* 压力总线: UART6, 挂3个压力计 */
@@ -157,6 +160,7 @@ void Sensor_Init(void)
     for (i = 0; i < 7; i++) g_time[i] = 0;
     g_armed = 0;
     g_time_valid = 0;
+    for (i = 0; i < 6; i++) { g_avg[i] = 0; m_smp[i] = 0; m_prev_run[i] = 0; }
 
     /* 初始所有传感器标记为离线 */
     for (i = 0; i < 6; i++) g_sen[i].online = 0;
@@ -235,6 +239,8 @@ static void Sen_StartReq(void)
 static void Sen_Parse(void)
 {
     u16 raw;
+    u8   fresh = 0;                    /* 本帧解析出有效测量值 */
+    float v = 0;                       /* fresh=1 时为本帧测量值 */
     sensor_t *s = &g_sen[m_cur];
 
     xSemaphoreTake(xDataMutex, portMAX_DELAY);  /* 加锁, 防止屏任务读到半截数据 */
@@ -245,12 +251,22 @@ static void Sen_Parse(void)
         raw = ((u16)m_rxbuf[5] << 8) | m_rxbuf[6];   /* 累计流量高字节在前 */
         s->flow_total = (float)raw * FLOW_TOTAL_K;    /* 乘系数转 m³ */
         s->online = 1;                                 /* 标记在线 */
+        v = s->flow_inst;                              /* 平均只计瞬时量 */
+        fresh = 1;
     }
     /* 压力计响应: 7字节, 第3字节=2(返回1个寄存器) */
     else if (m_bus == BUS_PRESS && m_rxlen == 7 && m_rxbuf[2] == 2) {
         raw = ((u16)m_rxbuf[3] << 8) | m_rxbuf[4];   /* 压力值高字节在前 */
         s->press  = (float)raw * PRESS_K;             /* 乘系数转实际压力值 */
         s->online = 1;
+        v = s->press;
+        fresh = 1;
+    }
+    /* 窗口内合格样本计入动态平均: g_run 本任务 10ms 刷新(写者=读者)免锁;
+     * g_avg 由屏任务经本函数已持的 xDataMutex 读, float 两字一致 */
+    if (fresh && g_run[m_cur]) {
+        m_smp[m_cur]++;
+        g_avg[m_cur] += (v - g_avg[m_cur]) / (float)m_smp[m_cur];
     }
     xSemaphoreGive(xDataMutex);                       /* 解锁 */
 }
@@ -258,7 +274,7 @@ static void Sen_Parse(void)
 /* 传感器轮询主循环: 每 10ms 节拍调用一次, 推进状态机 */
 void Sensor_Poll(void)
 {
-    u8 dat, cmd;
+    u8 dat, cmd, i;
     u8 ok = 0;
     u16 crc;
 
@@ -278,6 +294,14 @@ void Sensor_Poll(void)
     xSemaphoreTake(xDataMutex, portMAX_DELAY);
     Sched_UpdateRuns();
     xSemaphoreGive(xDataMutex);
+
+    /* 平均值窗口沿检测: 上升沿(进窗)清零重算。g_avg/m_smp/m_prev_run 与
+     * g_run 同在 TaskSensor 上下文(唯一写者=读者), 免锁, 沿用 g_run 惯例;
+     * 下降沿(出窗)无需动作——递推值就地冻结; 零样本窗口因开窗清零显示 0 */
+    for (i = 0; i < 6; i++) {
+        if (g_run[i] && !m_prev_run[i]) { g_avg[i] = 0; m_smp[i] = 0; }
+        m_prev_run[i] = g_run[i];
+    }
 
     /* 状态0: 发请求, 然后等下个节拍收响应 */
     if (m_state == 0) { Sen_StartReq(); return; }

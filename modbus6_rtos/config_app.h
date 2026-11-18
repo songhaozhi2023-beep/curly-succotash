@@ -122,6 +122,8 @@
 #define REG_TIME_BASE       0x0040   /* 7 寄存器: 年,月,日,时,分,秒,星期 (屏 Lua 每分钟写) */
 #define REG_SCHED_NUM       (6u * 4u)  /* 时刻表寄存器数 24 */
 #define REG_TIME_NUM        7u         /* RTC 寄存器数 */
+#define REG_AVG_BASE        0x0050   /* 12 寄存器: 6 路采集窗口平均值, 各 float 大端占 2 */
+#define REG_AVG_NUM         (6u * 2u)  /* 平均值寄存器数 12 */
 
 /*================ 数据与接口 ================*/
 typedef struct {
@@ -137,6 +139,7 @@ extern u16 xdata g_time[7];             /* 屏 RTC [年,月,日,时,分,秒,星�
 extern u8  xdata g_armed;               /* 1=时刻表已启用(屏按过"采集") */
 extern u8  xdata g_time_valid;          /* 1=收到过屏的 RTC 喂时 */
 extern u8  xdata g_run[6];              /* 调度评估结果: 1=该路在采集窗口内 */
+extern float xdata g_avg[6];            /* 各路采集窗口平均值(窗口内动态递推, 出窗冻结) */
 
 /* RTOS 三件套定义在 main.c, extern 声明放在各 .c 文件 include FreeRTOS 头之后 */
 
@@ -151,6 +154,7 @@ extern u8  xdata g_run[6];              /* 调度评估结果: 1=该路在采集
  *  0x0010~5  流量1~3 累计               FLOAT  (预留)
  *  0x0016/7  流量/压力"任一路在采"回读   U16    (预留)
  *  0x001A    采集状态位图 bit0~5         U16
+ *  0x0050~5B 六路采集窗口平均值         FLOAT  (窗口内动态平均, 出窗冻结)
  *
  *  【写寄存器 屏→MCU 06H/10H】
  *  0x0018    定时采集总开关  1=启用 0=取消并立即停 (读回=当前使能状态)
