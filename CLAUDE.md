@@ -36,12 +36,22 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **STC32G 串口"收后发"三件套**（485 实测踩坑，违反会死循环）：发送 fire-and-forget（不等 TI 置位）；每帧发送前重新初始化串口清卡死；接收 ISR **先读 SBUF 再清 RI**。
 - **IAP 读在该芯片恒返 0x00**：EEPROM 读已改 MOV 直读 `*(far*)(0xFC2800+偏移)`（0xFC2800 是 246K flash 在 24 位空间的基址），写/擦仍走 IAP，且 `IAP_ADDRE` 必须清 0、`IAP_TPS=24`。官方 bootloader 例程印证了基址但操作的是 AP 区不是 EEPROM 区。
 - **FreeRTOS 移植层**（线 B）：tick=Timer0 1kHz；临界区=全局 EA 开关（无嵌套计数）；任务栈=heap_4（4KB，在 EDATA 不在 XDATA），每任务 256B；251 的上下文切换靠 portasm.h 的 ECALL 归一化帧。**未验证风险**：Timer3 ISR 内 `portEND_SWITCHING_ISR` 的栈帧与 C251 ISR 序言可能错配（STC 移植包自述未充分验证）——上板若跑飞，预案是把 TaskSensor 改轮询唤醒。中断里不要用会阻塞的 API。
+- **线 B 定时窗口/平均值**：屏 main.lua 每分钟逐寄存器喂 RTC，整点先写"时"后写"分"，调度器会看到（新时+旧59分）中间态，使跨整点窗口抖动 1~2 tick。动 `Sched_UpdateRuns`/开窗清零/`g_avg` 相关代码时保持两个机制：开窗清零的 5 tick 离窗消抖（`AVG_CLEAR_GRACE_TICKS`）、`g_avg` 所有写路径持 xDataMutex（递推与清零都是）。曾因缺消抖在整点误清已累积数小时的平均值（2026-11-18 Critical，45c8234）。
 - **线 A 阀口安全**：复位默认 0xFF 会使 10 路半桥同时直通（总电流 >20A 掉压跑飞），main.c 第一件事就是清阀口锁存器；Timer0 ISR 里有 480ms 脉冲保险丝强制断 NET60。动 valve/NET60 相关代码时保持这两个机制。
 - **线 A 参数存储**：EEPROM 扇区 0=连续冲洗计数、扇区 1=参数（魔数+版本+XOR 校验，compare-dedup 防磨损）。改动 ParamConfig_t 布局必须升版本号。
 
+## 线 B 大彩屏工程与工具链（仓库外配套，改动必经流程）
+
+屏工程在 `D:/VisualTFT_Project/FlowPress/`（VisualTFT 工程，**不在本仓库**），源头是本仓库 `tools/` 下的生成器/校验器：
+
+- 改屏 = 改 `tools/gen_flowpress_screen.py` → **删除整个屏工程目录再重新生成**（生成器对已存在目录拒绝运行，防误覆盖；删除前预检素材：`D:/VisualTFT_Project/Project/font` 与 `D:/VisualTFT/VisualTFT/font/truefont/wqyMicroHei.ttf`，缺失会留下半截工程）→ `python -I tools/validate_flowpress_screen.py` PASS → 用户在 VisualTFT GUI 打开/保存（归一化 float 变量属性）/编译/下载到屏。GUI 步骤手工且不可省。
+- 校验器是屏工程改动的门：XML 良构、变体表↔固件寄存器映射（含小数位/缩放/列头）、页面绑定集合与逐行顺序、输入限幅、按钮置位复位、窗口判定逻辑镜像测试。GBK 控制台中文会乱码，**以退出码为准（0=PASS）**。
+- 寄存器表是跨仓库契约：`config_app.h` 映射注释 ↔ `script.xml` 变体地址 ↔ 校验器 expect 表，三处必须同步改。
+- 设计文档/实现计划惯例：`docs/superpowers/specs|plans/YYYY-MM-DD-<主题>.md`（含修订记录）；历史决策与联调要点先查这里。
+
 ## 当前状态与已知问题
 
-- **git 仓库零提交、无远程**——所有文件未跟踪。首次大改动前建议先做初始提交。
-- `modbus6_rtos`：编译 0 错 0 警，**尚未上板联调**。待办：S5CFG/S6CFG 波特率时钟源默认值待真机确认（config_app.h 注释标明）；传感器浮点系数"到货后按实测修正"（config_app.h）；彩屏寄存器表与 float 大端是按 VisualHMI 的单侧假设；485 发送等待用固定 2ms/判帧 5 tick 未验证。
+- **git 无远程**（无法建 PR），提交全在本地。工作在 feature 分支上（`feature/screen-3page` 载有大彩屏三页界面+定时采集平均值两批功能，均未合并进 main）。
+- `modbus6_rtos`：编译 0 错 0 警，**尚未上板联调**。已实现：大彩屏三页界面 + 定时采集（每路窗口调度 + 窗口内动态平均值，2026-11-18，设计见 `docs/superpowers/specs/`）。待办：S5CFG/S6CFG 波特率时钟源默认值待真机确认（config_app.h 注释标明）；传感器浮点系数"到货后按实测修正"（config_app.h）；彩屏 float 大端 byte_order 已按 VisualTFT 二进制 schema 核实（联调仍留固定值确认步骤，规格 §8）；485 发送等待用固定 2ms/判帧 5 tick 未验证。
 - 线 A README 有三处过时（代码为准）：ADC 结果格式已改 `(ADC_RES<<4)|(ADC_RESL>>4)`；蜂鸣器实际在 PA.0（P5.5 是基础版网标残留）；uvproj 文件名笔误（见上）。
 - 线 B 的 Modbus 寄存器映射定义在 `config_app.h` 注释（0x0000~0x005B，0x0050~0x005B 为六路采集窗口平均值），CRC16 在 `mb_crc.c`（0xA001 低字节先发）。
