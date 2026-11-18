@@ -51,7 +51,7 @@ expect = {"流量1瞬时": 0, "流量2瞬时": 2, "流量3瞬时": 4,
           "在线位图": 12, "流量1累计": 16, "流量2累计": 18, "流量3累计": 20,
           "采集使能": 24, "采集状态": 26,
           "流量1平均": 80, "流量2平均": 82, "流量3平均": 84,
-          "压力1平均": 86, "压力2平均": 88, "压力3平均": 90,
+          "压力1平均": 86, "压力2平均": 88, "压力3平均": 90,   # 0x0050~0x5B REG_AVG_BASE (config_app.h)
           "RTC年": 64, "RTC月": 65, "RTC日": 66, "RTC时": 67,
           "RTC分": 68, "RTC秒": 69, "RTC星期": 70}
 for n, a in expect.items():
@@ -104,6 +104,19 @@ b2 = {d.get("bind_variant") for d in disp2}
 chk(b2 == inst_v, f"实时数据页数值框应绑瞬时变体, 实为 {b2}")
 b3 = {d.get("bind_variant") for d in disp3}
 chk(b3 == avg_v, f"定时采集页数值框应绑平均变体, 实为 {b3}")
+avg_order = ("流量1平均", "流量2平均", "流量3平均", "压力1平均", "压力2平均", "压力3平均")
+by3 = {d.get("name"): d.get("bind_variant") for d in disp3}
+for r in range(6):
+    chk(by3.get(f"Val{r+1}") == avg_order[r],
+        f"定时采集页 Val{r+1} 应绑 {avg_order[r]}, 实为 {by3.get(f'Val{r+1}')}")
+by2 = {d.get("name"): d.get("bind_variant") for d in disp2}
+flow_order = ("流量1瞬时", "流量2瞬时", "流量3瞬时")
+press_order = ("压力1", "压力2", "压力3")
+for r in range(3):
+    chk(by2.get(f"ValF{r+1}") == flow_order[r],
+        f"实时数据页 ValF{r+1} 应绑 {flow_order[r]}, 实为 {by2.get(f'ValF{r+1}')}")
+    chk(by2.get(f"ValP{r+1}") == press_order[r],
+        f"实时数据页 ValP{r+1} 应绑 {press_order[r]}, 实为 {by2.get(f'ValP{r+1}')}")
 inp = [it for it in roots["定时采集页"].iter("item")
        if it.get("type") == "text_display" and it.get("input_mode") == "1"]
 chk(len(inp) == 24, f"输入框 {len(inp)} != 24")
