@@ -32,7 +32,8 @@ u8  xdata g_time_valid = 0;        /* 1=收到过屏 RTC (Lua 每分钟写 0x004
 u8  xdata g_run[6];                /* 调度结果: 1=该路在窗口内, Sensor_Poll 只轮询这些 */
 float xdata g_avg[6];              /* 各路窗口平均值: 窗口内动态递推, 出窗冻结(屏读 0x0050~5B) */
 static u32 xdata m_smp[6];         /* 本窗口已计入样本数 (递推平均分母) */
-static u8  xdata m_prev_run[6];    /* 上个 tick 的 g_run 快照: 0→1 上升沿=开窗, 清零重算 */
+static u8  xdata m_out[6];         /* 各路连续离窗 tick 计数: 超宽限后的进窗才算真实开窗 */
+#define AVG_CLEAR_GRACE_TICKS 5u   /* 开窗清零消抖宽限, 5 tick=50ms (RTC 整点喂时抖动 1~2 tick) */
 
 #define BUS_FLOW   0    /* 流量总线: UART5, 挂3个流量计 */
 #define BUS_PRESS  1    /* 压力总线: UART6, 挂3个压力计 */
@@ -160,7 +161,8 @@ void Sensor_Init(void)
     for (i = 0; i < 7; i++) g_time[i] = 0;
     g_armed = 0;
     g_time_valid = 0;
-    for (i = 0; i < 6; i++) { g_avg[i] = 0; m_smp[i] = 0; m_prev_run[i] = 0; }
+    /* 调度/平均状态清零 (xdata 上电不定值, 沿用双保险惯例) */
+    for (i = 0; i < 6; i++) { g_avg[i] = 0; m_smp[i] = 0; m_out[i] = 0; }
 
     /* 初始所有传感器标记为离线 */
     for (i = 0; i < 6; i++) g_sen[i].online = 0;
@@ -263,7 +265,10 @@ static void Sen_Parse(void)
         fresh = 1;
     }
     /* 窗口内合格样本计入动态平均: g_run 本任务 10ms 刷新(写者=读者)免锁;
-     * g_avg 由屏任务经本函数已持的 xDataMutex 读, float 两字一致 */
+     * g_avg 由屏任务经本函数已持的 xDataMutex 读, float 两字一致;
+     * 已知接受: 上一窗口的在途响应若在下一窗口开启后才解析, 会计入新窗口
+     * 一次——窗口间隔以分钟/小时计, 在途事务寿命<600ms, 实际不可达;
+     * 即便发生, 单样本偏差也被递推稀释 */
     if (fresh && g_run[m_cur]) {
         m_smp[m_cur]++;
         g_avg[m_cur] += (v - g_avg[m_cur]) / (float)m_smp[m_cur];
@@ -295,12 +300,25 @@ void Sensor_Poll(void)
     Sched_UpdateRuns();
     xSemaphoreGive(xDataMutex);
 
-    /* 平均值窗口沿检测: 上升沿(进窗)清零重算。g_avg/m_smp/m_prev_run 与
-     * g_run 同在 TaskSensor 上下文(唯一写者=读者), 免锁, 沿用 g_run 惯例;
-     * 下降沿(出窗)无需动作——递推值就地冻结; 零样本窗口因开窗清零显示 0 */
+    /* 平均值开窗判定(消抖): 连续离窗超过 AVG_CLEAR_GRACE_TICKS 后再进窗,
+     * 才视为真实开窗并清零重算。背景: 屏 main.lua 每分钟逐寄存器喂 RTC,
+     * 整点先写"时"后写"分", 调度器会看到 (新时+旧59分) 中间态, 使跨整点
+     * 窗口抖动 1~2 tick——不消抖会把已累积的平均值清掉; 真实窗口间隔以
+     * 分钟计, 50ms 宽限远小于任何真实间隔。清零写 g_avg 持锁(屏读路径经
+     * xDataMutex 读同一变量, 见 Sen_Parse 注释); m_out/m_smp 任务私有免锁。
+     * 出窗(下降沿)无动作, 递推值就地冻结; 零样本窗口因真实开窗清零显示 0 */
     for (i = 0; i < 6; i++) {
-        if (g_run[i] && !m_prev_run[i]) { g_avg[i] = 0; m_smp[i] = 0; }
-        m_prev_run[i] = g_run[i];
+        if (g_run[i]) {
+            if (m_out[i] >= AVG_CLEAR_GRACE_TICKS) {
+                xSemaphoreTake(xDataMutex, portMAX_DELAY);
+                g_avg[i] = 0;
+                xSemaphoreGive(xDataMutex);
+                m_smp[i] = 0;
+            }
+            m_out[i] = 0;
+        } else if (m_out[i] < 0xFFu) {
+            m_out[i]++;
+        }
     }
 
     /* 状态0: 发请求, 然后等下个节拍收响应 */

@@ -105,7 +105,7 @@ static u8 Scr_SetReg(u16 a, u16 v)
     }
     /* 0x0040~0x0046: 屏 RTC (年,月,日,时,分,秒,星期)
      * 注: 10H 多写逐寄存器持锁, 中间态可被调度器看到(新时+旧分),
-     * 后果<=1 tick, 与"在途事务收尾"同量级, 接受; 勿误判为竞态 bug */
+     * 后果<=1 tick, 与"在途事务收尾"同量级, 接受; 勿误判为竞态 bug; 跨整点窗口的 1~2 tick 开窗抖动由传感器侧消抖吸收, 见 sensors.c 开窗判定注释 */
     if (a >= REG_TIME_BASE && a < (REG_TIME_BASE + REG_TIME_NUM)) {
         xSemaphoreTake(xDataMutex, portMAX_DELAY);
         g_time[a - REG_TIME_BASE] = v;
