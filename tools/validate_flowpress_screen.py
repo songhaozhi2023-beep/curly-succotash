@@ -67,12 +67,15 @@ chk(len(addrs) == len(set(addrs)), "变量地址有重复")
 for v in vs:
     chk(v.get("type") == "2" and v.get("rw") == "0" and v.get("byte_order") == "0",
         f"变量 {v.get('name')} type/rw/byte_order 不符")
+    chk(v.get("factor_enable") == "0",
+        f"变量 {v.get('name')} factor_enable != 0 (显示缩放未关)")
 for n in ("流量1瞬时", "流量2瞬时", "流量3瞬时", "压力1", "压力2", "压力3",
           "流量1累计", "流量2累计", "流量3累计",
           "流量1平均", "流量2平均", "流量3平均",
           "压力1平均", "压力2平均", "压力3平均"):
     v = names.get(n)
-    chk(v is not None and v.get("format") == "2", f"{n} 缺失或 format != 2 (浮点)")
+    chk(v is not None and v.get("format") == "2" and v.get("dec_fill_zero") == "3",
+        f"{n} 缺失或 format/dec != 2/3 (浮点3位小数)")
 for n in ("RTC年", "RTC月", "RTC日", "RTC时", "RTC分", "RTC秒", "RTC星期"):
     chk(n in names, f"缺 RTC 变量 {n} (main.lua set_variant 需要同名)")
 
@@ -145,6 +148,9 @@ for pg, rt in roots.items():
             if u:
                 chk(os.path.exists(os.path.join(ROOT, u.replace("\\", "/"))),
                     f"{pg}/{it.get('name')} 缺图 {u}")
+
+hdr = next((it for it in roots["定时采集页"].iter("item") if it.get("name") == "HdV"), None)
+chk(hdr is not None and hdr.get("text") == "平均值", "定时采集页列头 HdV 应为 '平均值'")
 
 # ---- 5. 字体存在 ----
 fids = {f.get("id") for f in fonts.iter("font")}
